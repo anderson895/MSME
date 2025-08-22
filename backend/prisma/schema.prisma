@@ -1,0 +1,204 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MENTOR
+  MENTEE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING_APPROVAL
+}
+
+enum SessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  role         UserRole   @default(MENTEE)
+  status       UserStatus @default(ACTIVE)
+  passwordHash String
+  avatar       String?
+  verified     Boolean    @default(false)
+  verificationToken String?
+  verificationTokenExpires DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Relations
+  mentorSessions    Session[]     @relation("MentorSessions")
+  menteeSessions    SessionMentee[]
+  sentMessages      Message[]     @relation("MessageSender")
+  receivedMessages  Message[]     @relation("MessageReceiver")
+  announcements     Announcement[]
+  resources         Resource[]
+  ratings           Rating[]      @relation("MenteeRatings")
+  receivedRatings   Rating[]      @relation("MentorRatings")
+  salesData         SalesData[]
+  groupMembers      GroupMember[]
+  notifications     Notification[]
+
+  @@map("users")
+}
+
+model Session {
+  id          String        @id @default(cuid())
+  title       String
+  description String?
+  date        DateTime
+  duration    Int           // in minutes
+  status      SessionStatus @default(SCHEDULED)
+  mentorId    String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  mentor   User            @relation("MentorSessions", fields: [mentorId], references: [id])
+  mentees  SessionMentee[]
+
+  @@map("sessions")
+}
+
+model SessionMentee {
+  id        String @id @default(cuid())
+  sessionId String
+  menteeId  String
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  mentee  User    @relation(fields: [menteeId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, menteeId])
+  @@map("session_mentees")
+}
+
+model Announcement {
+  id         String   @id @default(cuid())
+  title      String
+  message    String   @db.Text
+  targetRole UserRole
+  createdBy  String
+  createdAt  DateTime @default(now())
+
+  author User @relation(fields: [createdBy], references: [id])
+
+  @@map("announcements")
+}
+
+model Resource {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  category    String
+  fileUrl     String
+  fileName    String
+  fileSize    Int
+  uploadedBy  String
+  createdAt   DateTime @default(now())
+
+  uploader User @relation(fields: [uploadedBy], references: [id])
+
+  @@map("resources")
+}
+
+model ChatGroup {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isGeneral   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  members  GroupMember[]
+  messages Message[]
+
+  @@map("chat_groups")
+}
+
+model GroupMember {
+  id      String @id @default(cuid())
+  groupId String
+  userId  String
+  joinedAt DateTime @default(now())
+
+  group ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@map("group_members")
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  content    String   @db.Text
+  senderId   String
+  receiverId String?  // For direct messages
+  groupId    String?  // For group messages
+  createdAt  DateTime @default(now())
+
+  sender   User       @relation("MessageSender", fields: [senderId], references: [id])
+  receiver User?      @relation("MessageReceiver", fields: [receiverId], references: [id])
+  group    ChatGroup? @relation(fields: [groupId], references: [id])
+
+  @@map("messages")
+}
+
+model Rating {
+  id       String @id @default(cuid())
+  mentorId String
+  menteeId String
+  score    Int    // 1-5 stars
+  comment  String?
+  createdAt DateTime @default(now())
+
+  mentor User @relation("MentorRatings", fields: [mentorId], references: [id])
+  mentee User @relation("MenteeRatings", fields: [menteeId], references: [id])
+
+  @@unique([mentorId, menteeId])
+  @@map("ratings")
+}
+
+model SalesData {
+  id       String @id @default(cuid())
+  userId   String
+  revenue  Float
+  month    Int
+  year     Int
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, month, year])
+  @@map("sales_data")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String   @db.Text
+  type      String   @default("info") // info, success, warning, error
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
