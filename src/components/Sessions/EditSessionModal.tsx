@@ -16,6 +16,7 @@ interface Session {
   date: string;
   duration: number;
   status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  meetingUrl?: string;
   mentees: Array<{
     mentee: {
       id: string;
@@ -43,6 +44,7 @@ const EditSessionModal: React.FC<EditSessionModalProps> = ({
     date: '',
     duration: 60,
     status: 'SCHEDULED' as 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED',
+    meetingUrl: '',
     menteeIds: [] as string[]
   });
   const [allMentees, setAllMentees] = useState<User[]>([]);
@@ -54,8 +56,16 @@ const EditSessionModal: React.FC<EditSessionModalProps> = ({
 
   useEffect(() => {
     if (session && isOpen) {
+      // Convert UTC date from database to local time for datetime-local input
+      // datetime-local expects format "YYYY-MM-DDTHH:mm" in local timezone
       const sessionDate = new Date(session.date);
-      const formattedDate = sessionDate.toISOString().slice(0, 16);
+      // Get local date components
+      const year = sessionDate.getFullYear();
+      const month = String(sessionDate.getMonth() + 1).padStart(2, '0');
+      const day = String(sessionDate.getDate()).padStart(2, '0');
+      const hours = String(sessionDate.getHours()).padStart(2, '0');
+      const minutes = String(sessionDate.getMinutes()).padStart(2, '0');
+      const formattedDate = `${year}-${month}-${day}T${hours}:${minutes}`;
       
       setFormData({
         title: session.title,
@@ -63,6 +73,7 @@ const EditSessionModal: React.FC<EditSessionModalProps> = ({
         date: formattedDate,
         duration: session.duration,
         status: session.status,
+        meetingUrl: session.meetingUrl || '',
         menteeIds: session.mentees.map(m => m.mentee.id)
       });
       setError('');
@@ -77,7 +88,7 @@ const EditSessionModal: React.FC<EditSessionModalProps> = ({
   const fetchAllMentees = async () => {
     try {
       setMenteesLoading(true);
-      const response = await axios.get('/api/users?role=MENTEE&status=ACTIVE');
+      const response = await axios.get('/users?role=MENTEE&status=ACTIVE');
       setAllMentees(response.data.data);
     } catch (error) {
       console.error('Error fetching mentees:', error);
@@ -116,19 +127,53 @@ const EditSessionModal: React.FC<EditSessionModalProps> = ({
     setError('');
 
     try {
-      const updateData = {
+      // Convert datetime-local to ISO string to preserve the exact moment in time
+      const dateToSend = formData.date ? new Date(formData.date).toISOString() : formData.date;
+      
+      const updateData: any = {
         title: formData.title,
         description: formData.description,
-        date: formData.date,
+        date: dateToSend,
         duration: formData.duration,
         status: formData.status
       };
 
-      await axios.put(`/api/sessions/${session.id}`, updateData);
+      // Include meetingUrl if provided (for group sessions with external links like Google Meet)
+      if (formData.meetingUrl.trim()) {
+        updateData.meetingUrl = formData.meetingUrl.trim();
+      }
+
+      // Include menteeIds if mentee selection was modified
+      if (showMenteeSelection) {
+        updateData.menteeIds = formData.menteeIds;
+      }
+
+      const response = await axios.put(`/sessions/${session.id}`, updateData);
+      console.log('Session updated successfully:', response.data);
       onSessionUpdated();
       onClose();
     } catch (error: any) {
-      setError(error.response?.data?.message || 'Failed to update session');
+      console.error('Error updating session:', error);
+      let errorMessage = 'Failed to update session';
+      
+      if (error.response) {
+        // Handle different HTTP status codes
+        if (error.response.status === 404) {
+          errorMessage = 'Session not found. It may have been deleted.';
+        } else if (error.response.status === 403) {
+          errorMessage = error.response.data?.message || 'You do not have permission to update this session';
+        } else if (error.response.status === 401) {
+          errorMessage = 'Your session has expired. Please refresh the page and try again.';
+        } else {
+          errorMessage = error.response.data?.message || errorMessage;
+        }
+      } else if (error.request) {
+        errorMessage = 'Unable to connect to the server. Please check your internet connection.';
+      } else {
+        errorMessage = error.message || errorMessage;
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -290,6 +335,28 @@ const EditSessionModal: React.FC<EditSessionModalProps> = ({
                   </select>
                 </div>
               </div>
+
+              {/* Meeting URL - Show for group sessions or when status is IN_PROGRESS */}
+              {(session.mentees.length > 1 || formData.status === 'IN_PROGRESS') && (
+                <div>
+                  <label htmlFor="meetingUrl" className="block text-sm font-medium text-gray-700 mb-2">
+                    Meeting URL
+                  </label>
+                  <input
+                    type="url"
+                    id="meetingUrl"
+                    value={formData.meetingUrl}
+                    onChange={(e) => setFormData({ ...formData, meetingUrl: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="https://meet.google.com/xxx-xxxx-xxx or other meeting link"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {session.mentees.length > 1 
+                      ? 'For group sessions, provide an external meeting URL (e.g., Google Meet, Zoom)'
+                      : 'Provide an external meeting URL for the session'}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Right Column - Current Mentees */}

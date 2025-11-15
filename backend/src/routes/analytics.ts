@@ -3,12 +3,14 @@ import { authenticateToken, requireMentor, requireMentee } from '../middleware/a
 import { 
   getDashboardAnalytics, 
   getMenteeAnalytics,
-  createSalesData 
+  createSalesData,
+  getRecentActivity
 } from '../controllers/analyticsController';
 
 const router = Router();
 
 router.get('/dashboard', authenticateToken, getDashboardAnalytics);
+router.get('/recent-activity', authenticateToken, getRecentActivity);
 router.get('/sales/:userId', authenticateToken, requireMentor, getMenteeAnalytics);
 router.post('/sales', authenticateToken, requireMentee, createSalesData);
 

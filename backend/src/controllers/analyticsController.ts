@@ -157,11 +157,34 @@ export const getMenteeAnalytics = async (req: AuthRequest, res: Response) => {
     const { userId } = req.params;
 
     // Check if user has permission to view this data
+    // Allow if: user is viewing their own data, user is ADMIN, or user is MENTOR viewing their mentee's data
     if (req.user.id !== userId && req.user.role !== 'ADMIN') {
-      return res.status(403).json({
-        success: false,
-        message: 'Unauthorized to view this data'
-      });
+      // If user is a mentor, check if the mentee is assigned to them
+      if (req.user.role === 'MENTOR') {
+        // Check if there's at least one session where this mentor is assigned to this mentee
+        const sessionWithMentee = await prisma.session.findFirst({
+          where: {
+            mentorId: req.user.id,
+            mentees: {
+              some: {
+                menteeId: userId
+              }
+            }
+          }
+        });
+
+        if (!sessionWithMentee) {
+          return res.status(403).json({
+            success: false,
+            message: 'Unauthorized to view this data. This mentee is not assigned to you.'
+          });
+        }
+      } else {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized to view this data'
+        });
+      }
     }
 
     const salesData = await prisma.salesData.findMany({
@@ -214,6 +237,116 @@ export const createSalesData = async (req: AuthRequest, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to save sales data'
+    });
+  }
+};
+
+export const getRecentActivity = async (req: AuthRequest, res: Response) => {
+  try {
+    const { user } = req;
+
+    // Only admins can view recent activity
+    if (user.role !== 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized to view recent activity'
+      });
+    }
+
+    // Fetch recent activities (last 10 of each type)
+    const [recentMentors, recentSessions, recentResources] = await Promise.all([
+      // Recent mentor registrations
+      prisma.user.findMany({
+        where: {
+          role: 'MENTOR',
+          status: 'ACTIVE'
+        },
+        orderBy: {
+          createdAt: 'desc'
+        },
+        take: 10,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          createdAt: true
+        }
+      }),
+      // Recent completed sessions
+      prisma.session.findMany({
+        where: {
+          status: 'COMPLETED'
+        },
+        orderBy: {
+          updatedAt: 'desc'
+        },
+        take: 10,
+        select: {
+          id: true,
+          title: true,
+          updatedAt: true,
+          mentor: {
+            select: {
+              name: true
+            }
+          }
+        }
+      }),
+      // Recent resource uploads
+      prisma.resource.findMany({
+        orderBy: {
+          createdAt: 'desc'
+        },
+        take: 10,
+        select: {
+          id: true,
+          title: true,
+          createdAt: true,
+          uploader: {
+            select: {
+              name: true
+            }
+          }
+        }
+      })
+    ]);
+
+    // Combine and sort all activities by date
+    const activities = [
+      ...recentMentors.map(mentor => ({
+        type: 'MENTOR_REGISTERED' as const,
+        title: 'New mentor registered',
+        description: mentor.name,
+        timestamp: mentor.createdAt,
+        icon: 'users' as const
+      })),
+      ...recentSessions.map(session => ({
+        type: 'SESSION_COMPLETED' as const,
+        title: 'Training session completed',
+        description: session.title,
+        timestamp: session.updatedAt,
+        icon: 'calendar' as const
+      })),
+      ...recentResources.map(resource => ({
+        type: 'RESOURCE_UPLOADED' as const,
+        title: 'New resource uploaded',
+        description: resource.title,
+        timestamp: resource.createdAt,
+        icon: 'book' as const
+      }))
+    ]
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 10); // Get top 10 most recent
+
+    res.json({
+      success: true,
+      data: activities
+    });
+  } catch (error) {
+    console.error('Get recent activity error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recent activity'
     });
   }
 };

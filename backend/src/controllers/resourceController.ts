@@ -20,11 +20,26 @@ export const createResource = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // Validate required fields
+    if (!title || !title.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Title is required'
+      });
+    }
+
+    if (!category || !category.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Category is required'
+      });
+    }
+
     const resource = await prisma.resource.create({
       data: {
-        title,
-        description,
-        category,
+        title: title.trim(),
+        description: description?.trim() || null,
+        category: category.trim(),
         fileUrl: `/uploads/${req.file.filename}`,
         fileName: req.file.originalname,
         fileSize: req.file.size,
@@ -42,11 +57,27 @@ export const createResource = async (req: AuthRequest, res: Response) => {
       data: resource,
       message: 'Resource uploaded successfully'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Create resource error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      name: error.name
+    });
+    
+    // Provide more detailed error in development
+    const errorMessage = process.env.NODE_ENV === 'development' 
+      ? error.message || 'Failed to upload resource'
+      : 'Failed to upload resource. Please try again.';
+    
     res.status(500).json({
       success: false,
-      message: 'Failed to upload resource'
+      message: errorMessage,
+      ...(process.env.NODE_ENV === 'development' && { 
+        error: error.message,
+        stack: error.stack 
+      })
     });
   }
 };
@@ -243,5 +274,63 @@ export const getCategories = async (req: AuthRequest, res: Response) => {
       success: false,
       message: 'Failed to fetch categories'
     });
+  }
+};
+
+export const downloadResource = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const resource = await prisma.resource.findUnique({
+      where: { id }
+    });
+
+    if (!resource) {
+      return res.status(404).json({
+        success: false,
+        message: 'Resource not found'
+      });
+    }
+
+    // Construct file path
+    const filePath = path.join(process.cwd(), resource.fileUrl);
+
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Set headers for file download
+    res.setHeader('Content-Disposition', `attachment; filename="${resource.fileName}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    
+    // Get file stats for Content-Length header
+    const stats = fs.statSync(filePath);
+    res.setHeader('Content-Length', stats.size);
+
+    // Stream the file to the response
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+    fileStream.on('error', (error) => {
+      console.error('Error streaming file:', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: 'Error downloading file'
+        });
+      }
+    });
+  } catch (error) {
+    console.error('Download resource error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to download resource'
+      });
+    }
   }
 };

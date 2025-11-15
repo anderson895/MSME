@@ -3,7 +3,8 @@ import { authenticateToken } from '../middleware/auth';
 import { 
   createRating, 
   getRatings, 
-  getMentorRatings 
+  getMentorRatings,
+  getAllRatingsForMentors
 } from '../controllers/ratingController';
 
 const router = Router();
@@ -70,5 +71,19 @@ router.get('/', authenticateToken, getRatings);
  *         description: Mentor ratings retrieved successfully
  */
 router.get('/mentor/:mentorId', authenticateToken, getMentorRatings);
+
+/**
+ * @swagger
+ * /api/ratings/all-for-mentors:
+ *   get:
+ *     tags: [Ratings]
+ *     summary: Get all ratings for all mentors (for displaying on mentors page)
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: All ratings retrieved successfully
+ */
+router.get('/all-for-mentors', authenticateToken, getAllRatingsForMentors);
 
 export default router;

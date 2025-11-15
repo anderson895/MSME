@@ -173,3 +173,32 @@ export const getMentorRatings = async (req: AuthRequest, res: Response) => {
     });
   }
 };
+
+export const getAllRatingsForMentors = async (req: AuthRequest, res: Response) => {
+  try {
+    // This endpoint allows mentees to see all ratings for all mentors
+    // Useful for displaying mentor ratings on the mentors page
+    const ratings = await prisma.rating.findMany({
+      include: {
+        mentor: {
+          select: { id: true, name: true, email: true }
+        },
+        mentee: {
+          select: { id: true, name: true, email: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({
+      success: true,
+      data: ratings
+    });
+  } catch (error) {
+    console.error('Get all ratings for mentors error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch ratings'
+    });
+  }
+};

@@ -1,6 +1,7 @@
 import axios from 'axios';
-import { ChevronLeft, ChevronRight, Clock, Plus, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Users, Video, ExternalLink } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
 interface Session {
@@ -10,6 +11,7 @@ interface Session {
   date: string;
   duration: number;
   status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  meetingUrl?: string;
   mentor: {
     id: string;
     name: string;
@@ -24,11 +26,11 @@ interface Session {
 
 const CalendarPage: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
 
   useEffect(() => {
     fetchSessions();
@@ -128,16 +130,6 @@ const CalendarPage: React.FC = () => {
           <h1 className="text-3xl font-bold text-gray-900">Training Calendar</h1>
           <p className="text-gray-600 mt-2">View and manage training sessions</p>
         </div>
-        
-        {(user?.role === 'ADMIN' || user?.role === 'MENTOR') && (
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Schedule Session</span>
-          </button>
-        )}
       </div>
 
       {/* Calendar */}
@@ -267,6 +259,28 @@ const CalendarPage: React.FC = () => {
                         <p className="text-sm text-gray-600 mt-2">
                           Mentor: {session.mentor.name}
                         </p>
+                        
+                        {/* Join Button for IN_PROGRESS sessions */}
+                        {session.status === 'IN_PROGRESS' && session.meetingUrl && (
+                          <div className="mt-3">
+                            <button
+                              onClick={() => {
+                                if (session.meetingUrl) {
+                                  if (session.meetingUrl.startsWith('http')) {
+                                    window.open(session.meetingUrl, '_blank');
+                                  } else {
+                                    navigate(session.meetingUrl);
+                                  }
+                                }
+                              }}
+                              className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                            >
+                              <Video className="h-4 w-4" />
+                              <span>Join Meeting</span>
+                              <ExternalLink className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                       
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(session.status)}`}>
@@ -281,23 +295,6 @@ const CalendarPage: React.FC = () => {
         </div>
       )}
 
-      {/* Create Session Modal Placeholder */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg max-w-md w-full mx-4">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Schedule New Session</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              This would open the session creation form. For now, this is just a placeholder.
-            </p>
-            <button
-              onClick={() => setShowCreateModal(false)}
-              className="w-full bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

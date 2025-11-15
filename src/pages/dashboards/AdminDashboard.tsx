@@ -12,9 +12,52 @@ interface DashboardStats {
   totalResources: number;
 }
 
+interface RecentActivity {
+  type: 'MENTOR_REGISTERED' | 'SESSION_COMPLETED' | 'RESOURCE_UPLOADED';
+  title: string;
+  description: string;
+  timestamp: string;
+  icon: 'users' | 'calendar' | 'book';
+}
+
+const formatTimeAgo = (timestamp: string): string => {
+  const now = new Date();
+  const time = new Date(timestamp);
+  const diffInSeconds = Math.floor((now.getTime() - time.getTime()) / 1000);
+
+  if (diffInSeconds < 60) {
+    return 'Just now';
+  }
+
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) {
+    return `${diffInMinutes} ${diffInMinutes === 1 ? 'minute' : 'minutes'} ago`;
+  }
+
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) {
+    return `${diffInHours} ${diffInHours === 1 ? 'hour' : 'hours'} ago`;
+  }
+
+  const diffInDays = Math.floor(diffInHours / 24);
+  if (diffInDays < 7) {
+    return `${diffInDays} ${diffInDays === 1 ? 'day' : 'days'} ago`;
+  }
+
+  const diffInWeeks = Math.floor(diffInDays / 7);
+  if (diffInWeeks < 4) {
+    return `${diffInWeeks} ${diffInWeeks === 1 ? 'week' : 'weeks'} ago`;
+  }
+
+  const diffInMonths = Math.floor(diffInDays / 30);
+  return `${diffInMonths} ${diffInMonths === 1 ? 'month' : 'months'} ago`;
+};
+
 const AdminDashboard: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activityLoading, setActivityLoading] = useState(true);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -28,7 +71,20 @@ const AdminDashboard: React.FC = () => {
       }
     };
 
+    const fetchRecentActivity = async () => {
+      try {
+        const response = await axios.get('/analytics/recent-activity');
+        setRecentActivity(response.data.data || []);
+      } catch (error) {
+        console.error('Error fetching recent activity:', error);
+        setRecentActivity([]);
+      } finally {
+        setActivityLoading(false);
+      }
+    };
+
     fetchStats();
+    fetchRecentActivity();
   }, []);
 
   if (loading) {
@@ -154,35 +210,72 @@ const AdminDashboard: React.FC = () => {
           <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
         </div>
         <div className="p-6">
-          <div className="space-y-4">
-            <div className="flex items-center space-x-3">
-              <div className="bg-green-100 p-2 rounded-full">
-                <Users className="h-4 w-4 text-green-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">New mentor registered</p>
-                <p className="text-xs text-gray-500">2 hours ago</p>
-              </div>
+          {activityLoading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center space-x-3 animate-pulse">
+                  <div className="bg-gray-200 p-2 rounded-full w-8 h-8"></div>
+                  <div className="flex-1">
+                    <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+                    <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="flex items-center space-x-3">
-              <div className="bg-blue-100 p-2 rounded-full">
-                <Calendar className="h-4 w-4 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">Training session completed</p>
-                <p className="text-xs text-gray-500">4 hours ago</p>
-              </div>
+          ) : recentActivity.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-gray-500 text-sm">No recent activity</p>
             </div>
-            <div className="flex items-center space-x-3">
-              <div className="bg-purple-100 p-2 rounded-full">
-                <BookOpen className="h-4 w-4 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-900">New resource uploaded</p>
-                <p className="text-xs text-gray-500">6 hours ago</p>
-              </div>
+          ) : (
+            <div className="space-y-4">
+              {recentActivity.map((activity, index) => {
+                const getIcon = () => {
+                  switch (activity.icon) {
+                    case 'users':
+                      return <Users className="h-4 w-4 text-green-600" />;
+                    case 'calendar':
+                      return <Calendar className="h-4 w-4 text-blue-600" />;
+                    case 'book':
+                      return <BookOpen className="h-4 w-4 text-purple-600" />;
+                    default:
+                      return <Users className="h-4 w-4 text-gray-600" />;
+                  }
+                };
+
+                const getBgColor = () => {
+                  switch (activity.icon) {
+                    case 'users':
+                      return 'bg-green-100';
+                    case 'calendar':
+                      return 'bg-blue-100';
+                    case 'book':
+                      return 'bg-purple-100';
+                    default:
+                      return 'bg-gray-100';
+                  }
+                };
+
+                return (
+                  <div key={index} className="flex items-center space-x-3">
+                    <div className={`${getBgColor()} p-2 rounded-full`}>
+                      {getIcon()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {activity.title}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {activity.description}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {formatTimeAgo(activity.timestamp)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

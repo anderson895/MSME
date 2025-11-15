@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { GraduationCap, Eye, EyeOff } from 'lucide-react';
+import { GraduationCap, Eye, EyeOff, Upload, FileText, X } from 'lucide-react';
 
 const RegisterPage: React.FC = () => {
   const [formData, setFormData] = useState({
@@ -12,6 +12,7 @@ const RegisterPage: React.FC = () => {
     confirmPassword: '',
     role: 'MENTEE'
   });
+  const [businessPermit, setBusinessPermit] = useState<File | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,6 +27,77 @@ const RegisterPage: React.FC = () => {
     });
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+      if (!allowedTypes.includes(file.type)) {
+        setError('Please upload a PDF, JPG, JPEG, or PNG file for your business permit');
+        return;
+      }
+      
+      // Validate file size (10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setError('Business permit file must be less than 10MB');
+        return;
+      }
+      
+      setBusinessPermit(file);
+      setError(''); // Clear any previous errors
+    }
+  };
+
+  const removeBusinessPermit = () => {
+    setBusinessPermit(null);
+    // Reset the file input
+    const fileInput = document.getElementById('businessPermit') as HTMLInputElement;
+    if (fileInput) {
+      fileInput.value = '';
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const files = e.dataTransfer.files;
+    if (files && files[0]) {
+      const file = files[0];
+      
+      // Validate file type
+      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+      if (!allowedTypes.includes(file.type)) {
+        setError('Please upload a PDF, JPG, JPEG, or PNG file for your business permit');
+        return;
+      }
+      
+      // Validate file size (10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setError('Business permit file must be less than 10MB');
+        return;
+      }
+      
+      setBusinessPermit(file);
+      setError(''); // Clear any previous errors
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -37,13 +109,34 @@ const RegisterPage: React.FC = () => {
       return;
     }
 
+    // Validate business permit for mentees
+    if (formData.role === 'MENTEE' && !businessPermit) {
+      setError('Business permit document is required for mentee registration');
+      setLoading(false);
+      return;
+    }
+
     try {
-      await register(formData.name, formData.email, formData.password, formData.role);
+      // Create FormData for file upload
+      const formDataToSend = new FormData();
+      formDataToSend.append('name', formData.name);
+      formDataToSend.append('email', formData.email);
+      formDataToSend.append('password', formData.password);
+      formDataToSend.append('role', formData.role);
+      
+      if (businessPermit) {
+        formDataToSend.append('businessPermit', businessPermit);
+      }
+
+      await register(formDataToSend);
       
       // For mentees, they will be automatically logged in and redirected
       // For mentors, show success message
       if (formData.role === 'MENTOR') {
         setShowMentorSuccess(true);
+      } else {
+        // For mentees, redirect to dashboard after successful registration
+        window.location.href = '/dashboard';
       }
     } catch (err: any) {
       // Check if it's a mentor success message
@@ -112,6 +205,7 @@ const RegisterPage: React.FC = () => {
                   confirmPassword: '',
                   role: 'MENTEE'
                 });
+                setBusinessPermit(null);
                 setError('');
               }}
               className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition-colors"
@@ -208,6 +302,77 @@ const RegisterPage: React.FC = () => {
                 <option value="MENTOR">Mentor (Providing guidance)</option>
               </select>
             </div>
+
+            {/* Business Permit Upload - Only for Mentees */}
+            {formData.role === 'MENTEE' && (
+              <div>
+                <label htmlFor="businessPermit" className="block text-sm font-medium text-gray-700">
+                  Business Permit Document <span className="text-red-500">*</span>
+                </label>
+                <div className="mt-1">
+                  {!businessPermit ? (
+                    <div 
+                      className="flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:border-blue-400 transition-colors"
+                      onDragOver={handleDragOver}
+                      onDragEnter={handleDragEnter}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                    >
+                      <div className="space-y-1 text-center">
+                        <Upload className="mx-auto h-12 w-12 text-gray-400" />
+                        <div className="flex text-sm text-gray-600">
+                          <label
+                            htmlFor="businessPermit"
+                            className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500"
+                          >
+                            <span>Upload your business permit</span>
+                            <input
+                              id="businessPermit"
+                              name="businessPermit"
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={handleFileChange}
+                              className="sr-only"
+                              required
+                            />
+                          </label>
+                          <p className="pl-1">or drag and drop</p>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          PDF, JPG, JPEG, PNG up to 10MB
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <div className="flex items-center space-x-3">
+                        <div className="flex-shrink-0">
+                          <FileText className="h-8 w-8 text-green-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-green-900 truncate">
+                            {businessPermit.name}
+                          </p>
+                          <p className="text-sm text-green-600">
+                            {(businessPermit.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={removeBusinessPermit}
+                        className="flex-shrink-0 p-1 text-green-600 hover:text-green-800 transition-colors"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-sm text-gray-500">
+                  Upload a valid business permit document. This helps us verify your business credentials.
+                </p>
+              </div>
+            )}
 
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">

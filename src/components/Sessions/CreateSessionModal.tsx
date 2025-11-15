@@ -94,7 +94,16 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     setError('');
 
     try {
-      await axios.post('/sessions', formData);
+      // Convert datetime-local to ISO string to preserve the exact moment in time
+      // datetime-local gives us a string like "2025-11-10T18:55" in local time
+      // We need to create a Date object from it (which interprets it as local time)
+      // and then convert to ISO string to preserve the correct moment
+      const dateToSend = formData.date ? new Date(formData.date).toISOString() : formData.date;
+      
+      await axios.post('/sessions', {
+        ...formData,
+        date: dateToSend
+      });
       onSessionCreated();
       onClose();
       setFormData({
@@ -105,7 +114,18 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
         menteeIds: []
       });
     } catch (error: any) {
-      setError(error.response?.data?.message || 'Failed to create session');
+      console.error('Error creating session:', error);
+      const errorMessage = error.response?.data?.message || 
+                          error.message || 
+                          'Failed to create session. Please try again.';
+      setError(errorMessage);
+      
+      // If it's an auth error, the interceptor should handle it, but show user-friendly message
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        if (errorMessage.toLowerCase().includes('token')) {
+          setError('Your session has expired. Please refresh the page and try again.');
+        }
+      }
     } finally {
       setLoading(false);
     }

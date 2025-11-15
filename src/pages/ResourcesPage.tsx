@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import axios from 'axios';
 import { Download, Edit, FileText, Filter, Image, Search, Trash2, Upload, Video, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
@@ -30,6 +31,7 @@ const ResourcesPage: React.FC = () => {
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
 
   // Form states
   const [uploadForm, setUploadForm] = useState({
@@ -71,28 +73,91 @@ const ResourcesPage: React.FC = () => {
     }
   };
 
+  const handleDownload = async (resource: Resource) => {
+    try {
+      // Use the download endpoint with proper authentication
+      const response = await axios.get(`/resources/${resource.id}/download`, {
+        responseType: 'blob',
+      });
+
+      // Create a blob URL and trigger download
+      const blob = new Blob([response.data]);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = resource.fileName || resource.title;
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('Error downloading resource:', error);
+      // Show error message to user
+      alert('Failed to download resource. Please try again.');
+    }
+  };
+
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!uploadForm.file) return;
+    setUploadError('');
+    
+    // Validation
+    if (!uploadForm.title.trim()) {
+      setUploadError('Please enter a title');
+      return;
+    }
+    
+    if (!uploadForm.category.trim()) {
+      setUploadError('Please enter a category');
+      return;
+    }
+    
+    if (!uploadForm.file) {
+      setUploadError('Please select a file to upload');
+      return;
+    }
 
     setUploadLoading(true);
     const formData = new FormData();
     formData.append('title', uploadForm.title);
-    formData.append('description', uploadForm.description);
+    formData.append('description', uploadForm.description || '');
     formData.append('category', uploadForm.category);
     formData.append('file', uploadForm.file);
 
     try {
       const response = await axios.post('/resources', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        // Let axios automatically set Content-Type with boundary for FormData
+        headers: {}
       });
       
       setResources([response.data.data, ...resources]);
       setShowUploadModal(false);
       setUploadForm({ title: '', description: '', category: '', file: null });
+      setUploadError('');
       fetchCategories(); // Refresh categories
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading resource:', error);
+      let errorMessage = 'Failed to upload resource. Please try again.';
+      
+      if (error.response) {
+        if (error.response.status === 413) {
+          errorMessage = 'File is too large. Maximum size is 5MB.';
+        } else if (error.response.status === 400) {
+          errorMessage = error.response.data?.message || 'Invalid file or missing required fields.';
+        } else if (error.response.status === 401 || error.response.status === 403) {
+          errorMessage = 'You do not have permission to upload resources.';
+        } else {
+          errorMessage = error.response.data?.message || errorMessage;
+        }
+      } else if (error.request) {
+        errorMessage = 'Unable to connect to the server. Please check your internet connection.';
+      } else {
+        errorMessage = error.message || errorMessage;
+      }
+      
+      setUploadError(errorMessage);
     } finally {
       setUploadLoading(false);
     }
@@ -315,7 +380,12 @@ const ResourcesPage: React.FC = () => {
                   </div>
                   
                   <button
-                    onClick={() => window.open(resource.fileUrl, '_blank')}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleDownload(resource);
+                    }}
                     className="flex items-center space-x-1 text-blue-600 hover:text-blue-800 transition-colors"
                   >
                     <Download className="h-4 w-4" />
@@ -347,7 +417,12 @@ const ResourcesPage: React.FC = () => {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-medium text-gray-900">Upload Resource</h3>
               <button
-                onClick={() => setShowUploadModal(false)}
+                type="button"
+                onClick={() => {
+                  setShowUploadModal(false);
+                  setUploadError('');
+                  setUploadForm({ title: '', description: '', category: '', file: null });
+                }}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <X className="h-5 w-5 text-gray-500" />
@@ -355,6 +430,13 @@ const ResourcesPage: React.FC = () => {
             </div>
             
             <form onSubmit={handleUpload} className="space-y-4">
+              {uploadError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start space-x-2">
+                  <X className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-red-700 text-sm">{uploadError}</p>
+                </div>
+              )}
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Title *
@@ -400,10 +482,30 @@ const ResourcesPage: React.FC = () => {
                 </label>
                 <input
                   type="file"
-                  onChange={(e) => setUploadForm({ ...uploadForm, file: e.target.files?.[0] || null })}
+                  accept="*/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    if (file) {
+                      // Validate file size (5MB max)
+                      const maxSize = 5 * 1024 * 1024; // 5MB
+                      if (file.size > maxSize) {
+                        alert('File size must be less than 5MB');
+                        e.target.value = ''; // Clear the input
+                        return;
+                      }
+                      setUploadForm({ ...uploadForm, file });
+                    } else {
+                      setUploadForm({ ...uploadForm, file: null });
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 />
+                {uploadForm.file && (
+                  <p className="text-sm text-gray-600 mt-1">
+                    Selected: {uploadForm.file.name} ({(uploadForm.file.size / 1024).toFixed(2)} KB)
+                  </p>
+                )}
               </div>
 
               <div className="flex space-x-3 pt-4">

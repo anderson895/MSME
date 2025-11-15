@@ -41,6 +41,11 @@ model User {
   verified     Boolean    @default(false)
   verificationToken String?
   verificationTokenExpires DateTime?
+  resetToken   String?
+  resetTokenExpires DateTime?
+  businessPermitUrl String?  // For mentees - business permit document
+  businessPermitFileName String?  // Original filename
+  businessPermitFileSize Int?  // File size in bytes
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -56,6 +61,7 @@ model User {
   salesData         SalesData[]
   groupMembers      GroupMember[]
   notifications     Notification[]
+  readAnnouncements AnnouncementRead[]
 
   @@map("users")
 }
@@ -68,6 +74,7 @@ model Session {
   duration    Int           // in minutes
   status      SessionStatus @default(SCHEDULED)
   mentorId    String
+  meetingUrl  String?       // Video call meeting URL
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -99,8 +106,22 @@ model Announcement {
   createdAt  DateTime @default(now())
 
   author User @relation(fields: [createdBy], references: [id])
+  readBy AnnouncementRead[]
 
   @@map("announcements")
+}
+
+model AnnouncementRead {
+  id             String   @id @default(cuid())
+  announcementId String
+  userId         String
+  readAt         DateTime @default(now())
+
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, userId])
+  @@map("announcement_reads")
 }
 
 model Resource {

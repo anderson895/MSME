@@ -5,8 +5,9 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import prisma from '../config/database';
-import { sendVerificationEmail, sendWelcomeEmail } from '../config/email';
+import { sendVerificationEmail, sendWelcomeEmail, sendPasswordResetEmail } from '../config/email';
 import { LoginRequest, RegisterRequest, AuthTokens } from '../types';
+import { validatePassword } from '../utils/passwordValidation';
 
 interface AuthRequest extends Request {
   user?: any;
@@ -39,11 +40,56 @@ const generateTokens = (userId: string): AuthTokens => {
 export const register = async (req: Request, res: Response) => {
   try {
     const { name, email, password, role = 'MENTEE' }: RegisterRequest = req.body;
+    
+    // Check if business permit is required for mentees
+    if (role === 'MENTEE' && !req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Business permit document is required for mentee registration'
+      });
+    }
 
     // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email }
-    });
+    let existingUser;
+    try {
+      existingUser = await prisma.user.findUnique({
+        where: { email }
+      });
+    } catch (dbError: any) {
+      // Handle database connection errors
+      if (dbError.code === 'P1000' || dbError.message?.includes('Authentication failed') || dbError.message?.includes('database credentials')) {
+        console.error('Database authentication error:', dbError);
+        return res.status(500).json({
+          success: false,
+          message: 'Database connection error. Please check your database credentials.',
+          ...(process.env.NODE_ENV === 'development' && { 
+            details: 'Verify your DATABASE_URL in .env file. Format: mysql://username:password@localhost:3306/database_name',
+            error: dbError.message
+          })
+        });
+      }
+      
+      // Handle database not found errors
+      if (dbError.code === 'P1003' || dbError.message?.includes('does not exist')) {
+        console.error('Database not found error:', dbError);
+        return res.status(500).json({
+          success: false,
+          message: 'Database not found. Please create the database first.',
+          ...(process.env.NODE_ENV === 'development' && { 
+            details: 'Run: CREATE DATABASE mentorship_db; in MySQL, then run: npm run db:push',
+            error: dbError.message,
+            fixSteps: [
+              '1. Connect to MySQL: mysql -u root -p',
+              '2. Create database: CREATE DATABASE mentorship_db;',
+              '3. Run: npm run db:push (in backend directory)',
+              '4. Restart the server'
+            ]
+          })
+        });
+      }
+      
+      throw dbError; // Re-throw if it's not a connection error
+    }
 
     if (existingUser) {
       return res.status(400).json({
@@ -66,26 +112,46 @@ export const register = async (req: Request, res: Response) => {
       verified = false;
     }
 
+    // Prepare user data
+    const userData: any = {
+      name,
+      email,
+      passwordHash,
+      role,
+      status: role === 'MENTOR' ? 'PENDING_APPROVAL' : 'ACTIVE',
+      verified,
+      verificationToken,
+      verificationTokenExpires
+    };
+
+    // Add business permit data for mentees
+    if (role === 'MENTEE' && req.file) {
+      userData.businessPermitUrl = `/uploads/${req.file.filename}`;
+      userData.businessPermitFileName = req.file.originalname;
+      userData.businessPermitFileSize = req.file.size;
+    }
+
     // Create user
     const user = await prisma.user.create({
-      data: {
-        name,
-        email,
-        passwordHash,
-        role,
-        status: role === 'MENTOR' ? 'PENDING_APPROVAL' : 'ACTIVE',
-        verified,
-        verificationToken,
-        verificationTokenExpires
-      }
+      data: userData
     });
 
     // Send verification email for mentees
     if (role === 'MENTEE' && verificationToken) {
       try {
         await sendVerificationEmail(email, name, verificationToken);
-      } catch (emailError) {
+        console.log(`Verification email sent successfully to ${email}`);
+      } catch (emailError: any) {
         console.error('Failed to send verification email:', emailError);
+        console.error('Email error details:', {
+          message: emailError.message,
+          code: emailError.code,
+          response: emailError.response
+        });
+        // Log email configuration status
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+          console.error('EMAIL_USER or EMAIL_PASS environment variables are not set!');
+        }
         // Continue with registration even if email fails
       }
     }
@@ -139,11 +205,30 @@ export const register = async (req: Request, res: Response) => {
         ? 'Registration successful! Your mentor account is pending admin approval. You will be notified once approved.'
         : 'User registered successfully'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Registration error:', error);
+    
+    // Handle Prisma errors
+    if (error.code === 'P2002') {
+      return res.status(400).json({
+        success: false,
+        message: 'User already exists with this email'
+      });
+    }
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError' || error.message?.includes('required')) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Validation error: Please check your input'
+      });
+    }
+    
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: process.env.NODE_ENV === 'development' 
+        ? error.message || 'Internal server error'
+        : 'Internal server error. Please try again later.'
     });
   }
 };
@@ -198,6 +283,14 @@ export const login = async (req: Request, res: Response) => {
         success: false,
         message: 'Please verify your email address before logging in. Check your inbox for the verification link.',
         requiresVerification: true
+      });
+    }
+
+    // Check if mentee account is pending approval (after email verification)
+    if (user.role === 'MENTEE' && user.status === 'PENDING_APPROVAL') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account is pending admin approval. Please wait for an administrator to approve your account before you can log in.'
       });
     }
 
@@ -292,11 +385,12 @@ export const verifyEmail = async (req: Request, res: Response) => {
       });
     }
 
-    // Update user as verified
+    // Update user as verified and set status to PENDING_APPROVAL (requires admin approval)
     await prisma.user.update({
       where: { id: user.id },
       data: {
         verified: true,
+        status: 'PENDING_APPROVAL',
         verificationToken: null,
         verificationTokenExpires: null
       }
@@ -311,7 +405,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      message: 'Email verified successfully! You can now log in to your account.'
+      message: 'Email verified successfully! Your account is now pending admin approval. You will be notified once your account has been approved and you can access the platform.'
     });
   } catch (error) {
     console.error('Email verification error:', error);
@@ -359,19 +453,160 @@ export const resendVerification = async (req: Request, res: Response) => {
     // Send verification email
     try {
       await sendVerificationEmail(email, user.name, verificationToken);
+      console.log(`Verification email resent successfully to ${email}`);
       res.json({
         success: true,
-        message: 'Verification email sent successfully'
+        message: 'Verification email sent successfully. Please check your inbox.'
       });
-    } catch (emailError) {
+    } catch (emailError: any) {
       console.error('Failed to send verification email:', emailError);
+      console.error('Email error details:', {
+        message: emailError.message,
+        code: emailError.code
+      });
       res.status(500).json({
         success: false,
-        message: 'Failed to send verification email'
+        message: emailError.message || 'Failed to send verification email. Please check email configuration.'
       });
     }
   } catch (error) {
     console.error('Resend verification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    // Find user by email
+    const user = await prisma.user.findUnique({
+      where: { email }
+    });
+
+    // Don't reveal if user exists or not for security reasons
+    // Always return success message
+    if (!user) {
+      return res.json({
+        success: true,
+        message: 'If an account with that email exists, a password reset link has been sent.'
+      });
+    }
+
+    // Generate reset token
+    const resetToken = require('crypto').randomBytes(32).toString('hex');
+    const resetTokenExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    // Save reset token to database
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken,
+        resetTokenExpires
+      }
+    });
+
+    // Send password reset email
+    try {
+      await sendPasswordResetEmail(email, user.name, resetToken);
+      console.log(`Password reset email sent successfully to ${email}`);
+      res.json({
+        success: true,
+        message: 'If an account with that email exists, a password reset link has been sent.'
+      });
+    } catch (emailError: any) {
+      console.error('Failed to send password reset email:', emailError);
+      console.error('Email error details:', {
+        message: emailError.message,
+        code: emailError.code
+      });
+      res.status(500).json({
+        success: false,
+        message: emailError.message || 'Failed to send password reset email. Please check email configuration.'
+      });
+    }
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reset token is required'
+      });
+    }
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password is required'
+      });
+    }
+
+    // Validate password requirements
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: passwordValidation.message || 'Password does not meet requirements'
+      });
+    }
+
+    // Find user with valid reset token
+    const user = await prisma.user.findFirst({
+      where: {
+        resetToken: token,
+        resetTokenExpires: {
+          gt: new Date()
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired reset token'
+      });
+    }
+
+    // Hash new password
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    // Update password and clear reset token
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        resetToken: null,
+        resetTokenExpires: null
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully. You can now login with your new password.'
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'

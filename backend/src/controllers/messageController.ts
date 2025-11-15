@@ -78,7 +78,29 @@ export const getChatUsers = async (req: AuthRequest, res: Response) => {
         }
       });
 
-      chatUsers = [...assignedMentees, ...admins];
+      // Fetch groups that mentor is a member of
+      const groupMemberships = await prisma.groupMember.findMany({
+        where: { userId: user.id },
+        include: {
+          group: {
+            select: {
+              id: true,
+              name: true,
+              description: true
+            }
+          }
+        }
+      });
+
+      const groups = groupMemberships.map(membership => ({
+        id: membership.group.id,
+        name: membership.group.name,
+        role: 'GROUP',
+        isGroup: true,
+        description: membership.group.description
+      }));
+
+      chatUsers = [...groups, ...assignedMentees, ...admins];
     } else {
       // Mentee can chat with assigned mentors and admins
       const assignedMentors = await prisma.user.findMany({
@@ -275,6 +297,149 @@ export const markMessagesAsRead = async (req: AuthRequest, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to mark messages as read'
+    });
+  }
+};
+
+export const createGroup = async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, description, memberIds } = req.body;
+    const { user } = req;
+
+    // Only mentors and admins can create groups
+    if (user.role !== 'MENTOR' && user.role !== 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only mentors and admins can create groups'
+      });
+    }
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Group name is required'
+      });
+    }
+
+    // Create the group
+    const group = await prisma.chatGroup.create({
+      data: {
+        name: name.trim(),
+        description: description?.trim() || null,
+        isGeneral: false
+      }
+    });
+
+    // Add creator as member
+    await prisma.groupMember.create({
+      data: {
+        groupId: group.id,
+        userId: user.id
+      }
+    });
+
+    // Add other members if provided
+    if (memberIds && Array.isArray(memberIds) && memberIds.length > 0) {
+      const validMemberIds = memberIds.filter((id: string) => id !== user.id); // Exclude creator
+      
+      if (validMemberIds.length > 0) {
+        await prisma.groupMember.createMany({
+          data: validMemberIds.map((memberId: string) => ({
+            groupId: group.id,
+            userId: memberId
+          })),
+          skipDuplicates: true
+        });
+      }
+    }
+
+    // Fetch the created group with members
+    const createdGroup = await prisma.chatGroup.findUnique({
+      where: { id: group.id },
+      include: {
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                avatar: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        id: createdGroup!.id,
+        name: createdGroup!.name,
+        description: createdGroup!.description,
+        role: 'GROUP',
+        isGroup: true,
+        members: createdGroup!.members.map(m => m.user)
+      },
+      message: 'Group created successfully'
+    });
+  } catch (error) {
+    console.error('Create group error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create group'
+    });
+  }
+};
+
+export const addGroupMembers = async (req: AuthRequest, res: Response) => {
+  try {
+    const { groupId } = req.params;
+    const { memberIds } = req.body;
+    const { user } = req;
+
+    // Verify user is a member of the group
+    const membership = await prisma.groupMember.findFirst({
+      where: {
+        groupId,
+        userId: user.id
+      }
+    });
+
+    if (!membership) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not a member of this group'
+      });
+    }
+
+    if (!memberIds || !Array.isArray(memberIds) || memberIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Member IDs are required'
+      });
+    }
+
+    // Add members
+    await prisma.groupMember.createMany({
+      data: memberIds.map((memberId: string) => ({
+        groupId,
+        userId: memberId
+      })),
+      skipDuplicates: true
+    });
+
+    res.json({
+      success: true,
+      message: 'Members added successfully'
+    });
+  } catch (error) {
+    console.error('Add group members error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add members'
     });
   }
 };

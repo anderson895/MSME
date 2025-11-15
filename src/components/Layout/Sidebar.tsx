@@ -8,13 +8,28 @@ import {
   User,
   Users
 } from 'lucide-react';
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 
 const Sidebar: React.FC = () => {
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+  const [isCallActive, setIsCallActive] = useState(false);
+
+  // Check if there's an active call
+  useEffect(() => {
+    const checkCallActive = () => {
+      const callActive = sessionStorage.getItem('isCallActive') === 'true';
+      setIsCallActive(callActive);
+    };
+    
+    checkCallActive();
+    const interval = setInterval(checkCallActive, 500);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // Enhanced navigation items with strict role-based access
   const getNavigationItems = () => {
@@ -82,7 +97,7 @@ const Sidebar: React.FC = () => {
             roles: ['MENTOR']
           },
           {
-            name: 'My Mentees',
+            name: 'List of Mentees',
             href: '/mentor/mentees',
             icon: Users,
             roles: ['MENTOR']
@@ -91,6 +106,12 @@ const Sidebar: React.FC = () => {
             name: 'Sessions',
             href: '/sessions',
             icon: Calendar,
+            roles: ['MENTOR']
+          },
+          {
+            name: 'Announcements',
+            href: '/announcements',
+            icon: Megaphone,
             roles: ['MENTOR']
           },
           {
@@ -205,15 +226,34 @@ const Sidebar: React.FC = () => {
             
             const isActive = location.pathname === item.href;
             
+            const handleNavigation = (e: React.MouseEvent<HTMLAnchorElement>) => {
+              // If call is active and not already on video-call page, prevent navigation
+              if (isCallActive && location.pathname === '/video-call' && item.href !== '/video-call') {
+                e.preventDefault();
+                const confirmed = window.confirm('You have an active call. Ending the call will disconnect you. Do you want to end the call and navigate?');
+                if (confirmed) {
+                  // Set flag to allow navigation, then navigate
+                  sessionStorage.setItem('isCallActive', 'false');
+                  sessionStorage.setItem('allowNavigation', 'true');
+                  navigate(item.href);
+                }
+              }
+            };
+
             return (
               <Link
                 key={item.name}
                 to={item.href}
+                onClick={handleNavigation}
                 className={`
                   group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors
                   ${isActive
                     ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
                     : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }
+                  ${isCallActive && location.pathname === '/video-call' && item.href !== '/video-call' 
+                    ? 'opacity-50 cursor-not-allowed' 
+                    : ''
                   }
                 `}
               >

@@ -3,6 +3,7 @@ import {
   createSession,
   deleteSession,
   getSessions,
+  getSessionById,
   updateSession
 } from '../controllers/sessionController';
 import { authenticateToken, requireMentor } from '../middleware/auth';
@@ -56,6 +57,30 @@ router.post('/', authenticateToken, requireMentor, createSession);
  *         description: Sessions retrieved successfully
  */
 router.get('/', authenticateToken, getSessions);
+
+/**
+ * @swagger
+ * /api/sessions/{id}:
+ *   get:
+ *     tags: [Sessions]
+ *     summary: Get a training session by ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Session retrieved successfully
+ *       404:
+ *         description: Session not found
+ *       403:
+ *         description: Access denied
+ */
+router.get('/:id', authenticateToken, getSessionById);
 
 /**
  * @swagger

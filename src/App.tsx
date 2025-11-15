@@ -1,5 +1,5 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
 import { useAuth } from './hooks/useAuth';
@@ -11,6 +11,8 @@ import Layout from './components/Layout/Layout';
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
 import EmailVerificationPage from './pages/auth/EmailVerificationPage';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 
 // Dashboard pages
 import AdminDashboard from './pages/dashboards/AdminDashboard';
@@ -24,10 +26,24 @@ import ResourcesPage from './pages/ResourcesPage';
 import ChatPage from './pages/ChatPage';
 import ProfilePage from './pages/ProfilePage';
 import AnnouncementsPage from './pages/AnnouncementsPage';
+import MentorAnnouncementsPage from './pages/MentorAnnouncementsPage';
 import CalendarPage from './pages/CalendarPage';
 import VideoCallPage from './pages/VideoCallPage';
 import MentorsPage from './pages/MentorsPage';
 import MenteesPage from './pages/MenteesPage';
+
+// Announcements wrapper component
+const AnnouncementsWrapper: React.FC = () => {
+  const { user } = useAuth();
+  
+  if (user?.role === 'ADMIN') {
+    return <AnnouncementsPage />;
+  } else if (user?.role === 'MENTOR') {
+    return <MentorAnnouncementsPage />;
+  }
+  
+  return <AnnouncementsPage />;
+};
 
 // Unauthorized page component
 const UnauthorizedPage: React.FC = () => (
@@ -85,7 +101,12 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; roles?: string[] }> 
             Please verify your email address to access your dashboard. Check your inbox for the verification link we sent you.
           </p>
           <button
-            onClick={() => window.location.href = '/login'}
+            onClick={() => {
+              // Clear auth data and navigate to login
+              localStorage.removeItem('accessToken');
+              localStorage.removeItem('refreshToken');
+              window.location.href = '/login';
+            }}
             className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
           >
             Back to Login
@@ -95,8 +116,8 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; roles?: string[] }> 
     );
   }
 
-  // Check if mentor account is pending approval
-  if (user.role === 'MENTOR' && user.status === 'PENDING_APPROVAL') {
+  // Check if account is pending approval (for both MENTOR and MENTEE)
+  if (user.status === 'PENDING_APPROVAL') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="max-w-md w-full bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
@@ -107,7 +128,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; roles?: string[] }> 
           </div>
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Account Pending Approval</h2>
           <p className="text-gray-600 mb-6">
-            Your mentor account is currently pending admin approval. You will be notified once your account has been approved and you can access the platform.
+            Your account is currently pending admin approval. You will be notified once your account has been approved and you can access the platform.
           </p>
           <button
             onClick={() => window.location.href = '/login'}
@@ -136,7 +157,7 @@ const getAccessibleRoutes = (userRole: string) => {
       '/calendar', '/resources', '/chat', '/profile', '/video-call'
     ],
     MENTOR: [
-      '/mentor', '/mentor/mentees', '/sessions', '/calendar', 
+      '/mentor', '/mentor/mentees', '/sessions', '/announcements', '/calendar', 
       '/resources', '/chat', '/profile', '/video-call'
     ],
     MENTEE: [
@@ -171,6 +192,40 @@ const RouteGuard: React.FC<{ children: React.ReactNode; path: string }> = ({
   return <>{children}</>;
 };
 
+// Navigation blocker component to prevent leaving active calls
+const NavigationBlocker: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const prevLocationRef = React.useRef(location.pathname);
+
+  useEffect(() => {
+    // Check if user is trying to navigate away from video-call page
+    const isCallActive = sessionStorage.getItem('isCallActive') === 'true';
+    const allowNavigation = sessionStorage.getItem('allowNavigation') === 'true';
+    
+    if (isCallActive && !allowNavigation && prevLocationRef.current === '/video-call' && location.pathname !== '/video-call') {
+      // Block navigation and show confirmation
+      const confirmed = window.confirm('You have an active call. Ending the call will disconnect you. Do you want to end the call and navigate?');
+      if (confirmed) {
+        // Allow navigation
+        sessionStorage.setItem('isCallActive', 'false');
+        sessionStorage.setItem('allowNavigation', 'true');
+        // Navigation will proceed naturally
+      } else {
+        // Navigate back to video-call page
+        navigate('/video-call', { replace: true });
+      }
+    } else if (allowNavigation) {
+      // Clear the allow navigation flag after use
+      sessionStorage.removeItem('allowNavigation');
+    }
+    
+    prevLocationRef.current = location.pathname;
+  }, [location.pathname, navigate]);
+
+  return null;
+};
+
 const AppRoutes: React.FC = () => {
   const { user } = useAuth();
 
@@ -190,11 +245,15 @@ const AppRoutes: React.FC = () => {
   };
 
   return (
-    <Routes>
+    <>
+      <NavigationBlocker />
+      <Routes>
       {/* Public routes */}
       <Route path="/login" element={!user ? <LoginPage /> : <Navigate to={getDashboard()} />} />
       <Route path="/register" element={!user ? <RegisterPage /> : <Navigate to={getDashboard()} />} />
       <Route path="/verify-email" element={<EmailVerificationPage />} />
+      <Route path="/forgot-password" element={!user ? <ForgotPasswordPage /> : <Navigate to={getDashboard()} />} />
+      <Route path="/reset-password" element={!user ? <ResetPasswordPage /> : <Navigate to={getDashboard()} />} />
       
       {/* Protected routes with layout */}
       <Route path="/" element={
@@ -222,8 +281,8 @@ const AppRoutes: React.FC = () => {
         } />
         <Route path="announcements" element={
           <RouteGuard path="/announcements">
-            <ProtectedRoute roles={['ADMIN']}>
-              <AnnouncementsPage />
+            <ProtectedRoute roles={['ADMIN', 'MENTOR']}>
+              <AnnouncementsWrapper />
             </ProtectedRoute>
           </RouteGuard>
         } />
@@ -311,6 +370,7 @@ const AppRoutes: React.FC = () => {
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 };
 

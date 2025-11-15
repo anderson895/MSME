@@ -13,7 +13,12 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:truncate": "node scripts/truncate-tables.js",
+    "db:seed": "ts-node prisma/seed.ts",
+    "db:create": "node scripts/create-database.js",
     "start:prod": "npm run build && pm2 start dist/server.js --name mentoring-backend"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

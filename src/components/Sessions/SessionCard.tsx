@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, Users, Edit, Trash2, Play, CheckCircle, Eye, MoreVertical } from 'lucide-react';
+import { Calendar, Clock, Users, Edit, Trash2, Play, CheckCircle, Eye, MoreVertical, Video, ExternalLink } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
 
 interface Session {
   id: string;
@@ -9,6 +10,7 @@ interface Session {
   date: string;
   duration: number;
   status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  meetingUrl?: string;
   mentor: {
     id: string;
     name: string;
@@ -37,6 +39,7 @@ const SessionCard: React.FC<SessionCardProps> = ({
   onView
 }) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [showActions, setShowActions] = useState(false);
 
   const getStatusColor = (status: string) => {
@@ -196,6 +199,31 @@ const SessionCard: React.FC<SessionCardProps> = ({
                   {session.mentees.length > 3 && ` +${session.mentees.length - 3} more`}
                 </p>
               )}
+              {session.status === 'IN_PROGRESS' && session.meetingUrl && (
+                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Video className="h-4 w-4 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-900">Meeting is live</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (session.meetingUrl) {
+                          if (session.meetingUrl.startsWith('http')) {
+                            window.open(session.meetingUrl, '_blank');
+                          } else {
+                            navigate(session.meetingUrl);
+                          }
+                        }
+                      }}
+                      className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-1"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      <span>Join Meeting</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             
             {canEdit && (
@@ -211,13 +239,32 @@ const SessionCard: React.FC<SessionCardProps> = ({
                 )}
                 
                 {session.status === 'IN_PROGRESS' && (
-                  <button
-                    onClick={() => onStatusChange(session.id, 'COMPLETED')}
-                    className="px-3 py-1 text-xs bg-green-100 text-green-800 rounded-full hover:bg-green-200 transition-colors flex items-center space-x-1"
-                  >
-                    <CheckCircle className="h-3 w-3" />
-                    <span>Complete</span>
-                  </button>
+                  <>
+                    {session.meetingUrl && (
+                      <button
+                        onClick={() => {
+                          if (session.meetingUrl) {
+                            if (session.meetingUrl.startsWith('http')) {
+                              window.open(session.meetingUrl, '_blank');
+                            } else {
+                              navigate(session.meetingUrl);
+                            }
+                          }
+                        }}
+                        className="px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded-full hover:bg-blue-200 transition-colors flex items-center space-x-1"
+                      >
+                        <Video className="h-3 w-3" />
+                        <span>Join</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => onStatusChange(session.id, 'COMPLETED')}
+                      className="px-3 py-1 text-xs bg-green-100 text-green-800 rounded-full hover:bg-green-200 transition-colors flex items-center space-x-1"
+                    >
+                      <CheckCircle className="h-3 w-3" />
+                      <span>Complete</span>
+                    </button>
+                  </>
                 )}
               </div>
             )}

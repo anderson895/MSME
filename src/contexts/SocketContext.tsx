@@ -1,9 +1,10 @@
 /* eslint-disable react-refresh/only-export-components */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { io } from "socket.io-client";
+import io from "socket.io-client";
 import { useAuth } from './AuthContext';
-import { Socket } from 'socket.io-client';
+
+type Socket = ReturnType<typeof io>;
 
 interface Message {
   id: string;
@@ -19,6 +20,12 @@ interface Message {
   };
 }
 
+interface IncomingCall {
+  callerId: string;
+  callerName: string;
+  offer: RTCSessionDescriptionInit;
+}
+
 interface SocketContextType {
   socket: Socket | null;
   messages: Message[];
@@ -27,7 +34,14 @@ interface SocketContextType {
     title: string;
     message: string;
     type: string;
+    sessionId?: string;
+    meetingUrl?: string;
+    senderId?: string;
+    senderName?: string;
+    timestamp?: string;
+    announcementId?: string;
   }>;
+  incomingCall: IncomingCall | null;
   sendMessage: (data: {
     receiverId?: string;
     groupId?: string;
@@ -35,6 +49,7 @@ interface SocketContextType {
   }) => void;
   joinRoom: (roomId: string) => void;
   clearNotifications: () => void;
+  clearIncomingCall: () => void;
 }
 
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
@@ -50,7 +65,14 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     title: string;
     message: string;
     type: string;
+    sessionId?: string;
+    meetingUrl?: string;
+    senderId?: string;
+    senderName?: string;
+    timestamp?: string;
+    announcementId?: string;
   }>>([]);
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
 
   useEffect(() => {
     if (user && !(user.role === 'MENTOR' && user.status === 'PENDING_APPROVAL')) {
@@ -77,6 +99,12 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         title: string;
         message: string;
         type: string;
+        senderId?: string;
+        senderName?: string;
+        timestamp?: string;
+        sessionId?: string;
+        meetingUrl?: string;
+        announcementId?: string;
       }) => {
         setNotifications(prev => [...prev, notification]);
       });
@@ -89,6 +117,34 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       socketInstance.on('user_stopped_typing', (_data: { userId: string }) => {
         // Handle stop typing indicator
         console.log('User stopped typing');
+      });
+
+      socketInstance.on('online_users', (users: string[]) => {
+        setOnlineUsers(users);
+      });
+
+      socketInstance.on('user_online', (userId: string) => {
+        setOnlineUsers(prev => [...prev, userId]);
+      });
+
+      socketInstance.on('user_offline', (userId: string) => {
+        setOnlineUsers(prev => prev.filter(id => id !== userId));
+      });
+
+      socketInstance.on('incoming_call', (data: { callerId: string; callerName: string; offer: RTCSessionDescriptionInit }) => {
+        // Only show notification if not already on video call page
+        if (window.location.pathname !== '/video-call') {
+          setIncomingCall(data);
+          // Play notification sound if possible
+          try {
+            const audio = new Audio('/notification.mp3');
+            audio.play().catch(() => {
+              // Ignore if audio play fails (user interaction required)
+            });
+          } catch (e) {
+            // Ignore audio errors
+          }
+        }
       });
 
       socketInstance.on('disconnect', () => {
@@ -122,15 +178,22 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const clearNotifications = () => {
     setNotifications([]);
   };
+
+  const clearIncomingCall = () => {
+    setIncomingCall(null);
+  };
+
   return (
     <SocketContext.Provider value={{
       socket,
       messages,
       onlineUsers,
       notifications,
+      incomingCall,
       sendMessage,
       joinRoom,
-      clearNotifications
+      clearNotifications,
+      clearIncomingCall
     }}>
       {children}
     </SocketContext.Provider>

@@ -15,6 +15,7 @@ interface Session {
   date: string;
   duration: number;
   status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  meetingUrl?: string;
   mentor: {
     id: string;
     name: string;

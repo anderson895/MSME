@@ -24,12 +24,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (
-    name: string,
-    email: string,
-    password: string,
-    role?: string
-  ) => Promise<void>;
+  register: (formData: FormData) => Promise<void>;
   logout: () => void;
   updateProfile: (data: Partial<User>) => Promise<void>;
 }
@@ -38,7 +33,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
-  "https://03e3a8c36953.ngrok-free.app/api" 
+  "http://localhost:3001/api" 
 
 // Configure axios defaults
 axios.defaults.baseURL = API_BASE_URL;
@@ -50,6 +45,13 @@ axios.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // Don't override Content-Type for FormData (multipart/form-data)
+    // Axios will set it automatically with the correct boundary
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
+    
     return config;
   },
   (error) => Promise.reject(error)
@@ -61,7 +63,12 @@ axios.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Handle both 401 (Unauthorized) and 403 (Forbidden) with "Invalid token" message
+    const isAuthError = error.response?.status === 401 || 
+                       (error.response?.status === 403 && 
+                        error.response?.data?.message?.toLowerCase().includes('token'));
+
+    if (isAuthError && !originalRequest._retry) {
       originalRequest._retry = true;
 
       const refreshToken = localStorage.getItem("refreshToken");
@@ -74,13 +81,23 @@ axios.interceptors.response.use(
           localStorage.setItem("accessToken", accessToken);
           localStorage.setItem("refreshToken", newRefreshToken);
 
+          // Retry the original request with the new token
+          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
           return axios(originalRequest);
         } catch (refreshError) {
+          // Token refresh failed, logout user
           localStorage.removeItem("accessToken");
           localStorage.removeItem("refreshToken");
           localStorage.removeItem("user");
           window.location.href = "/login";
+          return Promise.reject(refreshError);
         }
+      } else {
+        // No refresh token, redirect to login
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+        localStorage.removeItem("user");
+        window.location.href = "/login";
       }
     }
 
@@ -138,31 +155,34 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     }
   };
 
-  const register = async (
-    name: string,
-    email: string,
-    password: string,
-    role = "MENTEE"
-  ) => {
+  const register = async (formData: FormData) => {
     try {
-      const response = await axios.post("/auth/register", {
-        name,
-        email,
-        password,
-        role,
+      const response = await axios.post("/auth/register", formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
       });
 
-      const { user: userData, accessToken, refreshToken } = response.data.data;
+      const responseData = response.data.data;
+      const role = formData.get('role') as string;
 
-      // Only set user and tokens for non-mentors or approved accounts
-      if (role !== "MENTOR" && accessToken && refreshToken) {
-        localStorage.setItem("user", JSON.stringify(userData));
-        localStorage.setItem("accessToken", accessToken);
-        localStorage.setItem("refreshToken", refreshToken);
-        setUser(userData);
+      // Handle response based on role
+      if (role === "MENTOR") {
+        // Mentors don't get tokens, just return success
+        return responseData;
+      } else {
+        // Mentees get tokens and should be logged in
+        const { user: userData, accessToken, refreshToken } = responseData;
+        if (accessToken && refreshToken && userData) {
+          localStorage.setItem("user", JSON.stringify(userData));
+          localStorage.setItem("accessToken", accessToken);
+          localStorage.setItem("refreshToken", refreshToken);
+          setUser(userData);
+        }
+        return responseData;
       }
     } catch (error: any) {
-      const message = error.response?.data?.message || "Registration failed";
+      const message = error.response?.data?.message || error.message || "Registration failed";
       throw new Error(message);
     }
   };

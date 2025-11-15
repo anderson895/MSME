@@ -53,6 +53,13 @@ export const setupChatHandlers = (io: Server) => {
     // Store connected user
     if (socket.userData) {
       connectedUsers.set(socket.id, socket.userData);
+      
+      // Emit user online event to all clients
+      io.emit('user_online', socket.userData.id);
+      
+      // Send list of all online users to the newly connected user
+      const onlineUserIds = Array.from(connectedUsers.values()).map(u => u.id);
+      socket.emit('online_users', onlineUserIds);
     }
 
     // Join user to their role-based room
@@ -92,23 +99,33 @@ export const setupChatHandlers = (io: Server) => {
           // Direct message
           socket.to(`user_${data.receiverId}`).emit('new_message', message);
           
-          // Create notification for receiver
-          try {
-            await createNotification(
-              data.receiverId,
-              'New Message',
-              `You have a new message from ${socket.userData?.name}`,
-              'info'
-            );
-            
-            // Emit notification to receiver
-            socket.to(`user_${data.receiverId}`).emit('new_notification', {
-              title: 'New Message',
-              message: `You have a new message from ${socket.userData?.name}`,
-              type: 'info'
-            });
-          } catch (error) {
-            console.error('Error creating message notification:', error);
+          // Check if receiver is currently viewing the chat with the sender
+          // If they are, we'll skip creating a notification (they can see the message in real-time)
+          // Note: This is a simple check - in a more complex system, you might track active chat sessions
+          
+          // Create notification for receiver with accurate timestamp
+          // Only create if receiver is not the sender (shouldn't happen, but safety check)
+          if (data.receiverId !== socket.userId) {
+            try {
+              const notification = await createNotification(
+                data.receiverId,
+                'New Message',
+                `You have a new message from ${socket.userData?.name}`,
+                'info'
+              );
+              
+              // Emit notification to receiver with senderId for navigation
+              socket.to(`user_${data.receiverId}`).emit('new_notification', {
+                title: 'New Message',
+                message: `You have a new message from ${socket.userData?.name}`,
+                type: 'info',
+                senderId: socket.userId,
+                senderName: socket.userData?.name,
+                timestamp: message.createdAt
+              });
+            } catch (error) {
+              console.error('Error creating message notification:', error);
+            }
           }
         } else if (data.groupId) {
           // Group message
@@ -174,10 +191,23 @@ export const setupChatHandlers = (io: Server) => {
       socket.to(`user_${data.receiverId}`).emit('call_ended');
     });
 
+    socket.on('reject_call', (data: { callerId: string }) => {
+      socket.to(`user_${data.callerId}`).emit('call_rejected');
+    });
+
     // Handle disconnect
     socket.on('disconnect', () => {
       console.log(`User ${socket.userData?.name} disconnected`);
+      const userId = socket.userData?.id;
       connectedUsers.delete(socket.id);
+      
+      // Check if user has any other active connections
+      const hasOtherConnections = Array.from(connectedUsers.values()).some(u => u.id === userId);
+      
+      // Only emit offline if user has no other active connections
+      if (userId && !hasOtherConnections) {
+        io.emit('user_offline', userId);
+      }
     });
   });
 };

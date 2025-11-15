@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { authenticateToken, requireMentor } from '../middleware/auth';
 import { 
   createResource, 
@@ -7,19 +9,30 @@ import {
   getResourceById,
   updateResource,
   deleteResource,
-  getCategories 
+  getCategories,
+  downloadResource
 } from '../controllers/resourceController';
 
 const router = Router();
 
+// Ensure uploads directory exists (use absolute path)
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('Created uploads directory:', uploadsDir);
+}
+
 // Configure multer for file upload
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/');
+    // Use absolute path for production compatibility
+    cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
+    // Sanitize filename to prevent path traversal
+    const sanitizedOriginalName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
+    cb(null, uniqueSuffix + '-' + sanitizedOriginalName);
   }
 });
 
@@ -90,6 +103,31 @@ router.get('/', authenticateToken, getResources);
  *         description: Categories retrieved successfully
  */
 router.get('/categories', authenticateToken, getCategories);
+
+/**
+ * @swagger
+ * /api/resources/{id}/download:
+ *   get:
+ *     tags: [Resources]
+ *     summary: Download a resource file
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: File download initiated
+ *         content:
+ *           application/octet-stream:
+ *             schema:
+ *               type: string
+ *               format: binary
+ */
+router.get('/:id/download', authenticateToken, downloadResource);
 
 /**
  * @swagger

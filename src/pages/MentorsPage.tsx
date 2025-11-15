@@ -2,6 +2,8 @@
 import axios from 'axios';
 import { MessageCircle, Search, Star, Users, Video } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getAvatarUrl } from '../utils/avatarUtils';
 
 interface Mentor {
   id: string;
@@ -16,6 +18,7 @@ interface Mentor {
 }
 
 const MentorsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [mentors, setMentors] = useState<Mentor[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -30,18 +33,51 @@ const MentorsPage: React.FC = () => {
 
   const fetchMentors = async () => {
     try {
-      const response = await axios.get('/users?role=MENTOR&status=ACTIVE');
-      // Add mock rating data for demo
-      const mentorsWithRatings = response.data.data.map((mentor: any) => ({
-        ...mentor,
-        rating: 4.2 + Math.random() * 0.8,
-        totalRatings: Math.floor(Math.random() * 50) + 10,
-        specialization: 'Sales & Marketing',
-        experience: '5+ years'
-      }));
+      // Fetch mentors and all ratings in parallel
+      const [mentorsResponse, ratingsResponse] = await Promise.all([
+        axios.get('/users?role=MENTOR&status=ACTIVE'),
+        axios.get('/ratings/all-for-mentors') // Get all ratings for all mentors
+      ]);
+
+      const mentorsData = mentorsResponse.data.data || [];
+      const allRatings = ratingsResponse.data.data || [];
+
+      // Calculate ratings for each mentor
+      const mentorsWithRatings = mentorsData.map((mentor: any) => {
+        // Get all ratings for this mentor
+        const mentorRatings = allRatings.filter((rating: any) => rating.mentorId === mentor.id);
+        
+        // Calculate average rating (round to 1 decimal place)
+        const averageRating = mentorRatings.length > 0
+          ? Math.round((mentorRatings.reduce((sum: number, rating: any) => sum + rating.score, 0) / mentorRatings.length) * 10) / 10
+          : 0;
+
+        return {
+          ...mentor,
+          rating: averageRating,
+          totalRatings: mentorRatings.length,
+          specialization: mentor.specialization || 'Sales & Marketing',
+          experience: mentor.experience || '5+ years'
+        };
+      });
+
       setMentors(mentorsWithRatings);
     } catch (error) {
       console.error('Error fetching mentors:', error);
+      // Fallback: fetch mentors without ratings if ratings endpoint fails
+      try {
+        const mentorsResponse = await axios.get('/users?role=MENTOR&status=ACTIVE');
+        const mentorsData = mentorsResponse.data.data || [];
+        setMentors(mentorsData.map((mentor: any) => ({
+          ...mentor,
+          rating: 0,
+          totalRatings: 0,
+          specialization: mentor.specialization || 'Sales & Marketing',
+          experience: mentor.experience || '5+ years'
+        })));
+      } catch (fallbackError) {
+        console.error('Error fetching mentors (fallback):', fallbackError);
+      }
     } finally {
       setLoading(false);
     }
@@ -49,12 +85,12 @@ const MentorsPage: React.FC = () => {
 
   const handleStartChat = (mentor: Mentor) => {
     // Navigate to chat with mentor
-    window.location.href = `/chat?mentor=${mentor.id}`;
+    navigate(`/chat?mentor=${mentor.id}`);
   };
 
   const handleStartVideoCall = (mentor: Mentor) => {
     // Navigate to video call with mentor
-    window.location.href = `/video-call?mentor=${mentor.id}`;
+    navigate(`/video-call?mentor=${mentor.id}`);
   };
 
   const handleRateMentor = (mentor: Mentor) => {
@@ -130,30 +166,34 @@ const MentorsPage: React.FC = () => {
         {filteredMentors.map((mentor) => (
           <div key={mentor.id} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
             <div className="flex items-center space-x-4 mb-4">
-              {mentor.avatar ? (
-                <img
-                  src={mentor.avatar}
-                  alt={mentor.name}
-                  className="w-16 h-16 rounded-full"
-                />
-              ) : (
+              <div className="relative flex-shrink-0 w-16 h-16 flex items-center justify-center">
                 <div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center">
                   <span className="text-white text-xl font-medium">
                     {mentor.name.charAt(0)}
                   </span>
                 </div>
-              )}
+                {mentor.avatar && (
+                  <img
+                    src={getAvatarUrl(mentor.avatar)}
+                    alt={mentor.name}
+                    className="w-16 h-16 rounded-full object-cover absolute top-0 left-0"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                )}
+              </div>
               
-              <div className="flex-1">
-                <h3 className="text-lg font-medium text-gray-900">{mentor.name}</h3>
-                <p className="text-sm text-gray-600">{mentor.specialization}</p>
-                <p className="text-xs text-gray-500">{mentor.experience}</p>
+              <div className="flex-1 min-w-0 flex flex-col justify-center">
+                <h3 className="text-lg font-medium text-gray-900 truncate leading-tight">{mentor.name}</h3>
+                <p className="text-sm text-gray-600 line-clamp-2 leading-tight">{mentor.specialization}</p>
+                <p className="text-xs text-gray-500 truncate leading-tight">{mentor.experience}</p>
               </div>
             </div>
 
             {/* Rating */}
             <div className="flex items-center space-x-2 mb-4">
-              <div className="flex text-yellow-400">
+              <div className="flex text-yellow-400 items-center">
                 {[...Array(5)].map((_, i) => (
                   <Star
                     key={i}
@@ -163,7 +203,7 @@ const MentorsPage: React.FC = () => {
                   />
                 ))}
               </div>
-              <span className="text-sm text-gray-600">
+              <span className="text-sm text-gray-600 leading-normal">
                 {mentor.rating.toFixed(1)} ({mentor.totalRatings} reviews)
               </span>
             </div>

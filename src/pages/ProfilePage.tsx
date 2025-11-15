@@ -1,20 +1,34 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Lock, Save, Camera } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import axios from 'axios';
+import { getAvatarUrl } from '../utils/avatarUtils';
 
 const ProfilePage: React.FC = () => {
   const { user, updateProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('profile');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [avatarError, setAvatarError] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [profileData, setProfileData] = useState({
     name: user?.name || '',
     email: user?.email || '',
     avatar: user?.avatar || ''
   });
+
+  // Sync profileData with user changes
+  useEffect(() => {
+    if (user) {
+      setProfileData({
+        name: user.name || '',
+        email: user.email || '',
+        avatar: user.avatar || ''
+      });
+    }
+  }, [user]);
 
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
@@ -30,11 +44,92 @@ const ProfilePage: React.FC = () => {
     try {
       await updateProfile(profileData);
       setMessage('Profile updated successfully!');
+      // Clear message after 3 seconds
+      setTimeout(() => setMessage(''), 3000);
     } catch (error: any) {
-      setMessage(error.message);
+      setMessage(error.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setMessage('Please select an image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setMessage('Image size must be less than 5MB');
+      return;
+    }
+
+    setLoading(true);
+    setMessage('');
+
+    try {
+      const formData = new FormData();
+      formData.append('avatar', file);
+
+      const response = await axios.post(`/users/${user?.id}/avatar`, formData, {
+        // Let axios automatically set Content-Type with boundary for FormData
+        headers: {}
+      });
+
+      const updatedUser = response.data.data;
+      // Update profileData with new avatar URL
+      setProfileData(prev => ({
+        ...prev,
+        avatar: updatedUser.avatar || prev.avatar
+      }));
+
+      // Update user in context
+      await updateProfile({ avatar: updatedUser.avatar });
+      setAvatarError(false); // Reset error state for new avatar
+      setMessage('Profile picture updated successfully!');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (error: any) {
+      setMessage(error.response?.data?.message || 'Failed to upload profile picture');
+    } finally {
+      setLoading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleCameraClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const validatePassword = (password: string): string | null => {
+    if (!password) {
+      return 'Password is required';
+    }
+
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters long';
+    }
+
+    if (!/[A-Z]/.test(password)) {
+      return 'Password must contain at least one uppercase letter';
+    }
+
+    if (!/[a-z]/.test(password)) {
+      return 'Password must contain at least one lowercase letter';
+    }
+
+    if (!/[0-9]/.test(password)) {
+      return 'Password must contain at least one number';
+    }
+
+    return null;
   };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
@@ -42,21 +137,73 @@ const ProfilePage: React.FC = () => {
     setLoading(true);
     setMessage('');
 
+    // Validation
+    if (!passwordData.currentPassword) {
+      setMessage('Please enter your current password');
+      setLoading(false);
+      return;
+    }
+
+    if (!passwordData.newPassword) {
+      setMessage('Please enter a new password');
+      setLoading(false);
+      return;
+    }
+
+    // Validate password requirements
+    const passwordError = validatePassword(passwordData.newPassword);
+    if (passwordError) {
+      setMessage(passwordError);
+      setLoading(false);
+      return;
+    }
+
     if (passwordData.newPassword !== passwordData.confirmPassword) {
       setMessage('New passwords do not match');
       setLoading(false);
       return;
     }
 
+    if (passwordData.currentPassword === passwordData.newPassword) {
+      setMessage('New password must be different from current password');
+      setLoading(false);
+      return;
+    }
+
     try {
-      await axios.put(`/users/${user?.id}/password`, {
+      const response = await axios.put(`/users/${user?.id}/password`, {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword
       });
-      setMessage('Password changed successfully!');
-      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      
+      if (response.data.success) {
+        setMessage('Password changed successfully!');
+        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        setMessage(response.data.message || 'Failed to change password');
+      }
     } catch (error: any) {
-      setMessage(error.response?.data?.message || 'Failed to change password');
+      console.error('Password change error:', error);
+      let errorMessage = 'Failed to change password';
+      
+      if (error.response) {
+        if (error.response.status === 400) {
+          errorMessage = error.response.data?.message || 'Invalid password. Please check your current password.';
+        } else if (error.response.status === 403) {
+          errorMessage = 'You do not have permission to change this password';
+        } else if (error.response.status === 404) {
+          errorMessage = 'User not found';
+        } else {
+          errorMessage = error.response.data?.message || errorMessage;
+        }
+      } else if (error.request) {
+        errorMessage = 'Unable to connect to the server. Please check your internet connection.';
+      } else {
+        errorMessage = error.message || errorMessage;
+      }
+      
+      setMessage(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -76,20 +223,33 @@ const ProfilePage: React.FC = () => {
         <div className="px-6 pb-6">
           <div className="flex items-end space-x-5 -mt-12">
             <div className="relative mb-6 ">
-              {user?.avatar ? (
+              {user?.avatar && !avatarError ? (
                 <img
-                  src={user.avatar}
+                  src={getAvatarUrl(user.avatar)}
                   alt={user.name}
-                  className="w-20 h-20 rounded-full border-4 border-white shadow-lg"
+                  className="w-20 h-20 rounded-full border-4 border-white shadow-lg object-cover"
+                  onError={() => setAvatarError(true)}
                 />
               ) : (
                 <div className="w-20 h-20 rounded-full border-4 border-white shadow-lg bg-blue-500 flex items-center justify-center">
                   <User className="h-8 w-8 text-white" />
                 </div>
               )}
-              <button className="absolute bottom-0 right-0 bg-white rounded-full p-1.5 shadow-lg border border-gray-200 hover:bg-gray-50">
+              <button 
+                type="button"
+                onClick={handleCameraClick}
+                className="absolute bottom-0 right-0 bg-white rounded-full p-1.5 shadow-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+                title="Change profile picture"
+              >
                 <Camera className="h-3 w-3 text-gray-600" />
               </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
             </div>
             <div className="py-2 mt-12">
               <h2 className="text-xl font-bold text-gray-900">{user?.name}</h2>
@@ -105,24 +265,38 @@ const ProfilePage: React.FC = () => {
         <div className="border-b border-gray-200">
           <nav className="-mb-px flex space-x-8 px-6">
             <button
-              onClick={() => setActiveTab('profile')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              type="button"
+              onClick={() => {
+                setActiveTab('profile');
+                setMessage(''); // Clear any previous messages when switching tabs
+              }}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                 activeTab === 'profile'
                   ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Profile Information
+              <div className="flex items-center space-x-2">
+                <User className="h-4 w-4" />
+                <span>Profile Information</span>
+              </div>
             </button>
             <button
-              onClick={() => setActiveTab('password')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              type="button"
+              onClick={() => {
+                setActiveTab('password');
+                setMessage(''); // Clear any previous messages when switching tabs
+              }}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                 activeTab === 'password'
                   ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Change Password
+              <div className="flex items-center space-x-2">
+                <Lock className="h-4 w-4" />
+                <span>Change Password</span>
+              </div>
             </button>
           </nav>
         </div>
@@ -173,7 +347,7 @@ const ProfilePage: React.FC = () => {
 
               <div>
                 <label htmlFor="avatar" className="block text-sm font-medium text-gray-700 mb-2">
-                  Avatar URL
+                  Avatar URL (or use the camera icon above to upload)
                 </label>
                 <input
                   type="url"
@@ -183,6 +357,9 @@ const ProfilePage: React.FC = () => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="https://example.com/avatar.jpg"
                 />
+                <p className="mt-1 text-sm text-gray-500">
+                  You can either enter a URL or click the camera icon on your profile picture to upload an image file.
+                </p>
               </div>
 
               <div className="flex justify-end">

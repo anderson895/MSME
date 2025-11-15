@@ -1,23 +1,34 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import axios from 'axios';
-import { Search, UserCheck, Users } from 'lucide-react';
+import { Search, UserCheck, Users, FileText, Eye, X, MessageCircle, Video, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface User {
   id: string;
   name: string;
   email: string;
   role: 'ADMIN' | 'MENTOR' | 'MENTEE';
-  status: 'ACTIVE' | 'INACTIVE';
+  status: 'ACTIVE' | 'INACTIVE' | 'PENDING_APPROVAL';
   verified: boolean;
+  businessPermitUrl?: string;
+  businessPermitFileName?: string;
+  businessPermitFileSize?: number;
   createdAt: string;
 }
 
 const UsersPage: React.FC = () => {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
+  const [viewingPermit, setViewingPermit] = useState<{ userId: string; url: string; contentType: string } | null>(null);
+  const [viewingRevenue, setViewingRevenue] = useState<{ userId: string; userName: string } | null>(null);
+  const [revenueData, setRevenueData] = useState<Array<{ month: number; year: number; revenue: number }>>([]);
+  const [loadingRevenue, setLoadingRevenue] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -34,7 +45,7 @@ const UsersPage: React.FC = () => {
     }
   };
 
-  const updateUserStatus = async (userId: string, status: 'ACTIVE' | 'INACTIVE') => {
+  const updateUserStatus = async (userId: string, status: 'ACTIVE' | 'INACTIVE' | 'PENDING_APPROVAL') => {
     try {
       await axios.put(`/users/${userId}/status`, { status });
       setUsers(users.map(user => 
@@ -42,7 +53,97 @@ const UsersPage: React.FC = () => {
       ));
     } catch (error) {
       console.error('Error updating user status:', error);
+      alert('Failed to update user status. Please try again.');
     }
+  };
+
+  const handleViewBusinessPermit = async (userId: string) => {
+    try {
+      // Get the token for authentication
+      const token = localStorage.getItem('accessToken');
+      if (!token) {
+        alert('Please log in to view business permits');
+        return;
+      }
+
+      // Fetch the file as blob
+      const response = await axios.get(`/users/${userId}/business-permit`, {
+        responseType: 'blob',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      // Get content type from response headers
+      const contentType = response.headers['content-type'] || response.headers['Content-Type'] || 'application/octet-stream';
+      
+      // Create blob with proper MIME type
+      const blob = new Blob([response.data], { type: contentType });
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      // Store the blob URL and content type for display in modal
+      setViewingPermit({ userId, url: blobUrl, contentType });
+    } catch (error: any) {
+      console.error('Error viewing business permit:', error);
+      if (error.response?.status === 404) {
+        alert('Business permit file not found for this user');
+      } else {
+        alert(error.response?.data?.message || 'Failed to view business permit');
+      }
+    }
+  };
+
+  const handleStartChat = (userId: string) => {
+    navigate(`/chat?mentee=${userId}`);
+  };
+
+  const handleStartVideoCall = (userId: string) => {
+    navigate(`/video-call?mentee=${userId}`);
+  };
+
+  const handleViewProgress = async (userId: string, userName: string) => {
+    setViewingRevenue({ userId, userName });
+    setLoadingRevenue(true);
+    try {
+      const response = await axios.get(`/analytics/sales/${userId}`);
+      const salesData = response.data.data || [];
+      
+      // Format data for chart
+      const formattedData = salesData.map((item: any) => ({
+        month: item.month,
+        year: item.year,
+        revenue: item.revenue,
+        label: `${new Date(item.year, item.month - 1).toLocaleString('default', { month: 'short' })} ${item.year}`
+      })).sort((a: any, b: any) => {
+        if (a.year !== b.year) return a.year - b.year;
+        return a.month - b.month;
+      });
+      
+      setRevenueData(formattedData);
+    } catch (error: any) {
+      console.error('Error fetching revenue data:', error);
+      alert(error.response?.data?.message || 'Failed to fetch revenue data');
+      setViewingRevenue(null);
+    } finally {
+      setLoadingRevenue(false);
+    }
+  };
+
+  const calculateImprovement = () => {
+    if (revenueData.length < 2) return null;
+    
+    const firstRevenue = revenueData[0].revenue;
+    const lastRevenue = revenueData[revenueData.length - 1].revenue;
+    const difference = lastRevenue - firstRevenue;
+    const percentage = firstRevenue > 0 ? (difference / firstRevenue) * 100 : 0;
+    
+    return {
+      difference,
+      percentage: Math.abs(percentage),
+      isImproving: difference > 0,
+      isDeclining: difference < 0,
+      isStable: difference === 0
+    };
   };
 
   const filteredUsers = users.filter(user => {
@@ -67,9 +168,16 @@ const UsersPage: React.FC = () => {
   };
 
   const getStatusColor = (status: string) => {
-    return status === 'ACTIVE' 
-      ? 'bg-green-100 text-green-800' 
-      : 'bg-red-100 text-red-800';
+    switch (status) {
+      case 'ACTIVE':
+        return 'bg-green-100 text-green-800';
+      case 'INACTIVE':
+        return 'bg-red-100 text-red-800';
+      case 'PENDING_APPROVAL':
+        return 'bg-yellow-100 text-yellow-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
   };
 
   if (loading) {
@@ -119,6 +227,20 @@ const UsersPage: React.FC = () => {
               <p className="text-sm font-medium text-gray-600">Active Users</p>
               <p className="text-2xl font-bold text-gray-900">
                 {users.filter(u => u.status === 'ACTIVE').length}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <div className="flex items-center">
+            <div className="bg-yellow-500 p-3 rounded-lg">
+              <UserCheck className="h-6 w-6 text-white" />
+            </div>
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Pending Approval</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {users.filter(u => u.status === 'PENDING_APPROVAL').length}
               </p>
             </div>
           </div>
@@ -185,6 +307,7 @@ const UsersPage: React.FC = () => {
           <option value="">All Status</option>
           <option value="ACTIVE">Active</option>
           <option value="INACTIVE">Inactive</option>
+          <option value="PENDING_APPROVAL">Pending Approval</option>
         </select>
       </div>
 
@@ -205,6 +328,9 @@ const UsersPage: React.FC = () => {
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Joined
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Business Permit
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
@@ -241,22 +367,76 @@ const UsersPage: React.FC = () => {
                     {new Date(user.createdAt).toLocaleDateString()}
                   </td>
                   
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    {user.status === 'ACTIVE' ? (
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    {user.role === 'MENTEE' && user.businessPermitUrl ? (
                       <button
-                        onClick={() => updateUserStatus(user.id, 'INACTIVE')}
-                        className="text-red-600 hover:text-red-900 mr-3"
+                        onClick={() => handleViewBusinessPermit(user.id)}
+                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
+                        title={`View ${user.businessPermitFileName || 'business permit'}`}
                       >
-                        Deactivate
+                        <Eye className="h-4 w-4 mr-1" />
+                        View Permit
                       </button>
+                    ) : user.role === 'MENTEE' ? (
+                      <span className="text-xs text-gray-400">No permit</span>
                     ) : (
-                      <button
-                        onClick={() => updateUserStatus(user.id, 'ACTIVE')}
-                        className="text-green-600 hover:text-green-900 mr-3"
-                      >
-                        Activate
-                      </button>
+                      <span className="text-xs text-gray-400">-</span>
                     )}
+                  </td>
+                  
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <div className="flex items-center space-x-2">
+                      {/* Status Actions */}
+                      {user.status === 'PENDING_APPROVAL' ? (
+                        <button
+                          onClick={() => updateUserStatus(user.id, 'ACTIVE')}
+                          className="text-green-600 hover:text-green-900"
+                        >
+                          Approve
+                        </button>
+                      ) : user.status === 'ACTIVE' ? (
+                        <button
+                          onClick={() => updateUserStatus(user.id, 'INACTIVE')}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          Deactivate
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => updateUserStatus(user.id, 'ACTIVE')}
+                          className="text-green-600 hover:text-green-900"
+                        >
+                          Activate
+                        </button>
+                      )}
+                      
+                      {/* Action Buttons for Mentees */}
+                      {user.role === 'MENTEE' && (
+                        <>
+                          <button
+                            onClick={() => handleStartChat(user.id)}
+                            className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                            title="Chat"
+                          >
+                            <MessageCircle className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleStartVideoCall(user.id)}
+                            className="p-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                            title="Video Call"
+                          >
+                            <Video className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleViewProgress(user.id, user.name)}
+                            className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                            title="View Revenue Trend"
+                          >
+                            <TrendingUp className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -269,6 +449,263 @@ const UsersPage: React.FC = () => {
         <div className="text-center py-12">
           <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500">No users found matching your criteria</p>
+        </div>
+      )}
+
+      {/* Business Permit Viewer Modal */}
+      {viewingPermit && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Business Permit</h3>
+              <button
+                onClick={() => {
+                  if (viewingPermit.url.startsWith('blob:')) {
+                    window.URL.revokeObjectURL(viewingPermit.url);
+                  }
+                  setViewingPermit(null);
+                }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {viewingPermit.url && (
+                <>
+                  {viewingPermit.contentType.startsWith('image/') ? (
+                    <div className="flex items-center justify-center h-full min-h-[500px]">
+                      <img
+                        src={viewingPermit.url}
+                        alt="Business Permit"
+                        className="max-w-full max-h-full object-contain border border-gray-200 rounded-lg"
+                        onError={() => {
+                          alert('Failed to load business permit image. The file may be corrupted.');
+                        }}
+                      />
+                    </div>
+                  ) : viewingPermit.contentType === 'application/pdf' ? (
+                    <iframe
+                      src={viewingPermit.url}
+                      className="w-full h-full min-h-[500px] border border-gray-200 rounded-lg"
+                      title="Business Permit"
+                      onError={() => {
+                        alert('Failed to load business permit PDF. The file may be corrupted.');
+                      }}
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full min-h-[500px] text-gray-500">
+                      <FileText className="h-16 w-16 mb-4 text-gray-400" />
+                      <p className="text-lg font-medium mb-2">Business Permit File</p>
+                      <p className="text-sm mb-4">File type: {viewingPermit.contentType}</p>
+                      <a
+                        href={viewingPermit.url}
+                        download={`business-permit-${viewingPermit.userId}`}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Download File
+                      </a>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => {
+                  if (viewingPermit.url.startsWith('blob:')) {
+                    window.URL.revokeObjectURL(viewingPermit.url);
+                  }
+                  setViewingPermit(null);
+                }}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Revenue Trend Modal */}
+      {viewingRevenue && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Revenue Trend</h3>
+                <p className="text-sm text-gray-500 mt-1">{viewingRevenue.userName}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setViewingRevenue(null);
+                  setRevenueData([]);
+                }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              {loadingRevenue ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+                </div>
+              ) : revenueData.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-gray-500">
+                  <TrendingUp className="h-16 w-16 mb-4 text-gray-400" />
+                  <p className="text-lg font-medium mb-2">No Revenue Data Available</p>
+                  <p className="text-sm">This mentee has not submitted any sales data yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Improvement Indicator */}
+                  {calculateImprovement() && (() => {
+                    const improvement = calculateImprovement()!;
+                    return (
+                      <div className={`p-4 rounded-lg border-2 ${
+                        improvement.isImproving 
+                          ? 'bg-green-50 border-green-200' 
+                          : improvement.isDeclining 
+                          ? 'bg-red-50 border-red-200' 
+                          : 'bg-gray-50 border-gray-200'
+                      }`}>
+                        <div className="flex items-center space-x-3">
+                          {improvement.isImproving && (
+                            <TrendingUp className="h-6 w-6 text-green-600" />
+                          )}
+                          {improvement.isDeclining && (
+                            <TrendingDown className="h-6 w-6 text-red-600" />
+                          )}
+                          {improvement.isStable && (
+                            <Minus className="h-6 w-6 text-gray-600" />
+                          )}
+                          <div>
+                            <p className={`font-semibold ${
+                              improvement.isImproving 
+                                ? 'text-green-900' 
+                                : improvement.isDeclining 
+                                ? 'text-red-900' 
+                                : 'text-gray-900'
+                            }`}>
+                              {improvement.isImproving 
+                                ? `Revenue Increased by ${improvement.percentage.toFixed(1)}%` 
+                                : improvement.isDeclining 
+                                ? `Revenue Decreased by ${improvement.percentage.toFixed(1)}%` 
+                                : 'Revenue Remains Stable'}
+                            </p>
+                            <p className={`text-sm ${
+                              improvement.isImproving 
+                                ? 'text-green-700' 
+                                : improvement.isDeclining 
+                                ? 'text-red-700' 
+                                : 'text-gray-700'
+                            }`}>
+                              {improvement.difference > 0 ? '+' : ''}${Math.abs(improvement.difference).toLocaleString()} 
+                              {' '}from first to last recorded period
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Revenue Statistics */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                      <p className="text-sm font-medium text-blue-600 mb-1">Total Revenue</p>
+                      <p className="text-2xl font-bold text-blue-900">
+                        ₱{revenueData.reduce((sum, item) => sum + item.revenue, 0).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                      <p className="text-sm font-medium text-green-600 mb-1">Average Monthly</p>
+                      <p className="text-2xl font-bold text-green-900">
+                        ₱{(revenueData.reduce((sum, item) => sum + item.revenue, 0) / revenueData.length).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                      <p className="text-sm font-medium text-purple-600 mb-1">Data Points</p>
+                      <p className="text-2xl font-bold text-purple-900">{revenueData.length}</p>
+                    </div>
+                  </div>
+
+                  {/* Revenue Trend Chart */}
+                  <div className="bg-white p-4 rounded-lg border border-gray-200">
+                    <h4 className="text-md font-semibold text-gray-900 mb-4">Revenue Trend Over Time</h4>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <LineChart data={revenueData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                          dataKey="label" 
+                          angle={-45}
+                          textAnchor="end"
+                          height={80}
+                        />
+                        <YAxis />
+                        <Tooltip 
+                          formatter={(value: any) => [`₱${value.toLocaleString()}`, 'Revenue']}
+                          labelStyle={{ color: '#374151' }}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="revenue" 
+                          stroke="#9333EA" 
+                          strokeWidth={3}
+                          dot={{ fill: '#9333EA', strokeWidth: 2, r: 5 }}
+                          activeDot={{ r: 7 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Revenue Data Table */}
+                  <div className="bg-white p-4 rounded-lg border border-gray-200">
+                    <h4 className="text-md font-semibold text-gray-900 mb-4">Monthly Revenue Details</h4>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Period
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Revenue
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {revenueData.map((item, index) => (
+                            <tr key={index}>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                {item.label}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                                ₱{item.revenue.toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => {
+                  setViewingRevenue(null);
+                  setRevenueData([]);
+                }}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { Router } from 'express';
 import { Request, Response } from 'express';
-import { register, login, refresh, resendVerification, verifyEmail } from '../controllers/authController';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { register, login, refresh, resendVerification, verifyEmail, forgotPassword, resetPassword } from '../controllers/authController';
 import { authenticateToken } from '../middleware/auth';
 
 interface AuthRequest extends Request {
@@ -19,9 +22,50 @@ interface AuthRequest extends Request {
     createdAt: Date;
     updatedAt: Date;
   };
+  fileValidationError?: string;
+}
+
+interface RegisterRequest extends Request {
+  fileValidationError?: string;
 }
 
 const router = Router();
+
+// Ensure uploads directory exists (use absolute path)
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('Created uploads directory:', uploadsDir);
+}
+
+// Configure multer for business permit upload
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // Use absolute path for production compatibility
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    // Sanitize filename
+    const sanitizedOriginalName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'business-permit-' + uniqueSuffix + '-' + sanitizedOriginalName);
+  }
+});
+
+const upload = multer({ 
+  storage,
+  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760') }, // 10MB for business permits
+  fileFilter: (req: RegisterRequest, file, cb) => {
+    // Allow only PDF, JPG, JPEG, PNG files
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      req.fileValidationError = 'Only PDF, JPG, JPEG, and PNG files are allowed for business permits';
+      cb(null, false);
+    }
+  }
+});
 
 /**
  * @swagger
@@ -32,7 +76,7 @@ const router = Router();
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             properties:
@@ -45,11 +89,45 @@ const router = Router();
  *               role:
  *                 type: string
  *                 enum: [MENTOR, MENTEE]
+ *               businessPermit:
+ *                 type: string
+ *                 format: binary
+ *                 description: Business permit document (required for MENTEE role)
  *     responses:
  *       201:
  *         description: User registered successfully
  */
-router.post('/register', register);
+router.post('/register', upload.single('businessPermit'), (req: RegisterRequest, res: Response, next: () => void) => {
+  // Handle multer errors
+  if (req.fileValidationError) {
+    return res.status(400).json({
+      success: false,
+      message: req.fileValidationError
+    });
+  }
+  next();
+}, (err: Error | multer.MulterError, req: RegisterRequest, res: Response, next: () => void) => {
+  // Handle multer file size errors
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        message: 'File size too large. Maximum size is 10MB.'
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      message: err.message || 'File upload error'
+    });
+  }
+  if (err) {
+    return res.status(400).json({
+      success: false,
+      message: err.message || 'File upload error'
+    });
+  }
+  next();
+}, register);
 
 /**
  * @swagger
@@ -133,6 +211,50 @@ router.get('/verify-email', verifyEmail);
  *         description: Verification email sent successfully
  */
 router.post('/resend-verification', resendVerification);
+
+/**
+ * @swagger
+ * /api/auth/forgot-password:
+ *   post:
+ *     tags: [Authentication]
+ *     summary: Request password reset
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password reset email sent successfully
+ */
+router.post('/forgot-password', forgotPassword);
+
+/**
+ * @swagger
+ * /api/auth/reset-password:
+ *   post:
+ *     tags: [Authentication]
+ *     summary: Reset password with token
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               token:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password reset successfully
+ */
+router.post('/reset-password', resetPassword);
 
 // Get current user
 const getCurrentUser = async (req: AuthRequest, res: Response) => {
