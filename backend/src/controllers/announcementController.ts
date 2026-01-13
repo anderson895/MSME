@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import prisma from '../config/database';
 import { createNotification } from './notificationController';
 import { getIO } from '../utils/socket';
+import { sendAnnouncementEmail } from '../config/email';
 
 interface AuthRequest extends Request {
   user?: any;
@@ -36,7 +37,8 @@ export const createAnnouncement = async (req: AuthRequest, res: Response) => {
         },
         select: {
           id: true,
-          name: true
+          name: true,
+          email: true
         }
       });
 
@@ -63,10 +65,22 @@ export const createAnnouncement = async (req: AuthRequest, res: Response) => {
               timestamp: new Date()
             });
           }
+
+          // Send email notification (non-blocking)
+          sendAnnouncementEmail(user.email, user.name, title, message, targetRole)
+            .then(() => {
+              console.log(`Announcement email sent successfully to ${user.email}`);
+            })
+            .catch((emailError) => {
+              console.error(`Failed to send announcement email to ${user.email}:`, emailError);
+              // Don't fail the announcement if email fails
+            });
         } catch (error) {
           console.error(`Error sending notification to user ${user.id}:`, error);
         }
       }
+
+      console.log(`Announcement notifications sent to ${targetUsers.length} ${targetRole} user(s)`);
     } catch (error) {
       console.error('Error sending announcement notifications:', error);
       // Don't fail the request if notifications fail

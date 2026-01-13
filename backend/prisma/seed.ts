@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
@@ -253,7 +254,8 @@ async function main() {
       name: 'General Discussion',
       description: 'General discussion group for all members',
       isGeneral: true,
-    },
+      // createdBy is null for general groups
+    } as any,
   });
 
   const businessGroup = await prisma.chatGroup.create({
@@ -261,7 +263,17 @@ async function main() {
       name: 'Business Development',
       description: 'Discussion group for business development topics',
       isGeneral: false,
-    },
+      createdBy: mentor1.id, // Mentor created this group
+    } as any,
+  });
+
+  const marketingGroup = await prisma.chatGroup.create({
+    data: {
+      name: 'Marketing Strategies',
+      description: 'Group for discussing marketing strategies and campaigns',
+      isGeneral: false,
+      createdBy: admin.id, // Admin created this group
+    } as any,
   });
 
   // Add members to groups
@@ -278,6 +290,10 @@ async function main() {
       { groupId: businessGroup.id, userId: mentee1.id },
       { groupId: businessGroup.id, userId: mentee2.id },
       { groupId: businessGroup.id, userId: mentee3.id },
+      { groupId: marketingGroup.id, userId: admin.id },
+      { groupId: marketingGroup.id, userId: mentor1.id },
+      { groupId: marketingGroup.id, userId: mentor2.id },
+      { groupId: marketingGroup.id, userId: mentee1.id },
     ],
   });
 
@@ -288,7 +304,8 @@ async function main() {
       content: 'Welcome everyone to the mentorship platform!',
       senderId: admin.id,
       groupId: generalGroup.id,
-    },
+      // deletedAt is null by default (not deleted)
+    } as any,
   });
 
   await prisma.message.create({
@@ -296,7 +313,7 @@ async function main() {
       content: 'Thank you for the warm welcome!',
       senderId: mentee1.id,
       groupId: generalGroup.id,
-    },
+    } as any,
   });
 
   await prisma.message.create({
@@ -304,7 +321,7 @@ async function main() {
       content: 'Hello, I have a question about business planning.',
       senderId: mentee1.id,
       receiverId: mentor1.id,
-    },
+    } as any,
   });
 
   await prisma.message.create({
@@ -312,7 +329,23 @@ async function main() {
       content: 'I\'d be happy to help! What would you like to know?',
       senderId: mentor1.id,
       receiverId: mentee1.id,
-    },
+    } as any,
+  });
+
+  await prisma.message.create({
+    data: {
+      content: 'Let\'s discuss business development strategies in this group.',
+      senderId: mentor1.id,
+      groupId: businessGroup.id,
+    } as any,
+  });
+
+  await prisma.message.create({
+    data: {
+      content: 'Great idea! I\'m interested in learning more.',
+      senderId: mentee1.id,
+      groupId: businessGroup.id,
+    } as any,
   });
 
   // Create Ratings
@@ -350,45 +383,61 @@ async function main() {
   const currentMonth = currentDate.getMonth() + 1;
   const currentYear = currentDate.getFullYear();
 
+  // Calculate months with proper year handling
+  const month1 = currentMonth - 2 >= 1 ? currentMonth - 2 : 12;
+  const year1 = currentMonth - 2 >= 1 ? currentYear : currentYear - 1;
+  const month2 = currentMonth - 1 >= 1 ? currentMonth - 1 : 12;
+  const year2 = currentMonth - 1 >= 1 ? currentYear : currentYear - 1;
+  const month3 = currentMonth;
+  const year3 = currentYear;
+
+  // Note: Each user can only have one sales entry per month/year (unique constraint)
+  // So we'll create entries for different months or combine categories into one entry
   await prisma.salesData.createMany({
     data: [
       {
         userId: mentee1.id,
         revenue: 5000.00,
-        month: currentMonth - 2 >= 1 ? currentMonth - 2 : 12,
-        year: currentMonth - 2 >= 1 ? currentYear : currentYear - 1,
+        category: 'Product Sales',
+        month: month1,
+        year: year1,
       },
       {
         userId: mentee1.id,
         revenue: 7500.00,
-        month: currentMonth - 1 >= 1 ? currentMonth - 1 : 12,
-        year: currentMonth - 1 >= 1 ? currentYear : currentYear - 1,
+        category: 'Service Sales',
+        month: month2,
+        year: year2,
       },
       {
         userId: mentee1.id,
         revenue: 10000.00,
-        month: currentMonth,
-        year: currentYear,
+        category: 'Product Sales',
+        month: month3,
+        year: year3,
       },
       {
         userId: mentee2.id,
         revenue: 3000.00,
-        month: currentMonth - 1 >= 1 ? currentMonth - 1 : 12,
-        year: currentMonth - 1 >= 1 ? currentYear : currentYear - 1,
+        category: 'Service Sales',
+        month: month2,
+        year: year2,
       },
       {
         userId: mentee2.id,
         revenue: 4500.00,
-        month: currentMonth,
-        year: currentYear,
+        category: 'Product Sales',
+        month: month3,
+        year: year3,
       },
       {
         userId: mentee3.id,
         revenue: 2000.00,
-        month: currentMonth,
-        year: currentYear,
+        category: 'Service Sales',
+        month: month3,
+        year: year3,
       },
-    ],
+    ] as any,
   });
 
   // Create Notifications

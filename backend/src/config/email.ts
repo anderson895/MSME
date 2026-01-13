@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 
-// Email configuration
+// Email configuration with timeout settings
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.gmail.com',
   port: parseInt(process.env.EMAIL_PORT || '587'),
@@ -9,6 +9,14 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  // Add timeout configurations to prevent hanging connections
+  connectionTimeout: 10000, // 10 seconds to establish connection
+  socketTimeout: 10000, // 10 seconds for socket operations
+  greetingTimeout: 10000, // 10 seconds for SMTP greeting
+  // Retry configuration
+  pool: true,
+  maxConnections: 1,
+  maxMessages: 3,
 });
 
 export const sendVerificationEmail = async (
@@ -80,12 +88,22 @@ export const sendVerificationEmail = async (
   };
 
   try {
-    // Verify transporter configuration
-    await transporter.verify();
+    // Verify transporter configuration with timeout
+    await Promise.race([
+      transporter.verify(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email verification timeout')), 10000)
+      )
+    ]);
     console.log('Email transporter verified successfully');
     
-    // Send email
-    const info = await transporter.sendMail(mailOptions);
+    // Send email with timeout
+    const info = await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Email sending timeout')), 15000)
+      )
+    ]);
     console.log(`Verification email sent to ${email}`, { messageId: info.messageId });
   } catch (error: unknown) {
     console.error('Error sending verification email:', error);
@@ -98,10 +116,12 @@ export const sendVerificationEmail = async (
     });
     
     // Provide more helpful error message
-    if (emailError.code === 'EAUTH') {
+    if (emailError.message?.includes('timeout')) {
+      throw new Error('Email service timeout. The email server is taking too long to respond. Please try again later.');
+    } else if (emailError.code === 'EAUTH') {
       throw new Error('Email authentication failed. Please check EMAIL_USER and EMAIL_PASS configuration.');
-    } else if (emailError.code === 'ECONNECTION') {
-      throw new Error('Could not connect to email server. Please check EMAIL_HOST and EMAIL_PORT configuration.');
+    } else if (emailError.code === 'ECONNECTION' || emailError.code === 'ETIMEDOUT') {
+      throw new Error('Could not connect to email server. Please check EMAIL_HOST and EMAIL_PORT configuration or network connectivity.');
     } else {
       throw new Error(`Failed to send verification email: ${emailError.message || 'Unknown error'}`);
     }
@@ -161,7 +181,13 @@ export const sendWelcomeEmail = async (email: string, name: string) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    // Send email with timeout
+    await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email sending timeout')), 15000)
+      )
+    ]);
     console.log(`Welcome email sent to ${email}`);
   } catch (error) {
     console.error('Error sending welcome email:', error);
@@ -234,12 +260,22 @@ export const sendPasswordResetEmail = async (
   };
 
   try {
-    // Verify transporter configuration
-    await transporter.verify();
+    // Verify transporter configuration with timeout
+    await Promise.race([
+      transporter.verify(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email verification timeout')), 10000)
+      )
+    ]);
     console.log('Email transporter verified successfully');
     
-    // Send email
-    const info = await transporter.sendMail(mailOptions);
+    // Send email with timeout
+    const info = await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Email sending timeout')), 15000)
+      )
+    ]);
     console.log(`Password reset email sent to ${email}`, { messageId: info.messageId });
   } catch (error: unknown) {
     console.error('Error sending password reset email:', error);
@@ -252,13 +288,245 @@ export const sendPasswordResetEmail = async (
     });
     
     // Provide more helpful error message
-    if (emailError.code === 'EAUTH') {
+    if (emailError.message?.includes('timeout')) {
+      throw new Error('Email service timeout. The email server is taking too long to respond. Please try again later.');
+    } else if (emailError.code === 'EAUTH') {
       throw new Error('Email authentication failed. Please check EMAIL_USER and EMAIL_PASS configuration.');
-    } else if (emailError.code === 'ECONNECTION') {
-      throw new Error('Could not connect to email server. Please check EMAIL_HOST and EMAIL_PORT configuration.');
+    } else if (emailError.code === 'ECONNECTION' || emailError.code === 'ETIMEDOUT') {
+      throw new Error('Could not connect to email server. Please check EMAIL_HOST and EMAIL_PORT configuration or network connectivity.');
     } else {
       throw new Error(`Failed to send password reset email: ${emailError.message || 'Unknown error'}`);
     }
+  }
+};
+
+export const sendApprovalEmail = async (
+  email: string,
+  name: string,
+  role: 'MENTOR' | 'MENTEE'
+) => {
+  // Validate email configuration
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.error('Email configuration missing: EMAIL_USER or EMAIL_PASS not set');
+    // Don't throw error, just log it - approval should still succeed
+    return;
+  }
+
+  const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login`;
+  const roleLabel = role === 'MENTOR' ? 'Mentor' : 'MSME (Mentee)';
+  const roleSpecificContent = role === 'MENTOR' 
+    ? `
+      <ul>
+        <li><strong>Create Training Sessions:</strong> Schedule and conduct training sessions for mentees</li>
+        <li><strong>Upload Resources:</strong> Share educational materials, guides, and templates</li>
+        <li><strong>Connect with Mentees:</strong> Communicate directly with your assigned mentees</li>
+        <li><strong>Track Progress:</strong> Monitor mentee engagement and session completion</li>
+      </ul>
+    `
+    : `
+      <ul>
+        <li><strong>Join Training Sessions:</strong> Attend scheduled sessions with your assigned mentors</li>
+        <li><strong>Access Resources:</strong> Download training materials and guides</li>
+        <li><strong>Track Your Progress:</strong> Monitor your learning journey and achievements</li>
+        <li><strong>Connect with Mentors:</strong> Message mentors directly for guidance</li>
+      </ul>
+    `;
+
+  const mailOptions = {
+    from: `"MentorHub" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: `🎉 Your ${roleLabel} Account Has Been Approved!`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Account Approved</title>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #10B981, #3B82F6); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }
+            .button { display: inline-block; background: #10B981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: bold; }
+            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+            .highlight { background: #d1fae5; padding: 15px; border-radius: 6px; margin: 20px 0; border-left: 4px solid #10B981; }
+            ul { margin: 15px 0; padding-left: 20px; }
+            li { margin: 8px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🎉 Account Approved!</h1>
+              <p>You're ready to start your journey</p>
+            </div>
+            <div class="content">
+              <h2>Congratulations ${name}!</h2>
+              <p>Great news! Your ${roleLabel} account registration has been reviewed and <strong>approved</strong> by our admin team.</p>
+              
+              <div class="highlight">
+                <p style="margin: 0;"><strong>✅ Your account is now active!</strong> You can now log in and start using all the features of MentorHub.</p>
+              </div>
+
+              <p>You can now access your account and enjoy the following features:</p>
+              ${roleSpecificContent}
+
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${loginUrl}" class="button">Login to Your Account</a>
+              </div>
+
+              <p><strong>Next Steps:</strong></p>
+              <ol>
+                <li>Click the button above or visit: <a href="${loginUrl}" style="color: #3B82F6;">${loginUrl}</a></li>
+                <li>Log in using the email and password you used during registration</li>
+                <li>Explore the dashboard and start your mentorship journey!</li>
+              </ol>
+
+              <p style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+                <strong>Need help?</strong><br>
+                If you have any questions or need assistance, please don't hesitate to contact our support team. We're here to help you succeed!
+              </p>
+            </div>
+            <div class="footer">
+              <p>Welcome to MentorHub!<br>The MentorHub Team</p>
+              <p>Need help? Contact us at support@mentorhub.com</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+  };
+
+  try {
+    // Send email with timeout
+    await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email sending timeout')), 15000)
+      )
+    ]);
+    console.log(`Approval email sent to ${email} for ${roleLabel}: ${name}`);
+  } catch (error: unknown) {
+    console.error('Error sending approval email:', error);
+    const emailError = error as { message?: string; code?: string };
+    console.error('Email error details:', {
+      message: emailError.message,
+      code: emailError.code,
+      recipient: email,
+      role: role
+    });
+    // Don't throw error - approval should still succeed even if email fails
+  }
+};
+
+export const sendAnnouncementEmail = async (
+  email: string,
+  name: string,
+  title: string,
+  message: string,
+  targetRole: string
+) => {
+  // Validate email configuration
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.error('Email configuration missing: EMAIL_USER or EMAIL_PASS not set');
+    // Don't throw error, just log it - announcement should still succeed
+    return;
+  }
+
+  const announcementsUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/announcements`;
+  const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login`;
+  const roleLabel = targetRole === 'MENTOR' ? 'Mentors' : targetRole === 'MENTEE' ? 'MSMEs (Mentees)' : 'Admins';
+
+  const mailOptions = {
+    from: `"MentorHub" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: `📢 New Announcement: ${title}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>New Announcement</title>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #3B82F6, #8B5CF6); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }
+            .announcement-box { background: white; padding: 25px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3B82F6; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .announcement-title { color: #1f2937; font-size: 24px; font-weight: bold; margin-bottom: 15px; }
+            .announcement-message { color: #4b5563; font-size: 16px; line-height: 1.8; white-space: pre-wrap; }
+            .button { display: inline-block; background: #3B82F6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: bold; }
+            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 14px; }
+            .badge { display: inline-block; background: #dbeafe; color: #1e40af; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-bottom: 15px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>📢 New Announcement</h1>
+              <p>Important update from MentorHub</p>
+            </div>
+            <div class="content">
+              <h2>Hi ${name},</h2>
+              <p>We have an important announcement for all ${roleLabel} on the MentorHub platform.</p>
+              
+              <div class="announcement-box">
+                <span class="badge">ANNOUNCEMENT</span>
+                <div class="announcement-title">${title}</div>
+                <div class="announcement-message">${message}</div>
+              </div>
+
+              <p>Please take a moment to read this announcement as it may contain important information about:</p>
+              <ul style="margin: 15px 0; padding-left: 20px;">
+                <li>Platform updates and new features</li>
+                <li>Upcoming training sessions or events</li>
+                <li>Policy changes or important notices</li>
+                <li>Community news and updates</li>
+              </ul>
+
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${announcementsUrl}" class="button">View All Announcements</a>
+              </div>
+
+              <p style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+                <strong>Note:</strong> This announcement was sent to all ${roleLabel} on the platform. 
+                You can view all announcements and stay updated by logging into your MentorHub account.
+              </p>
+            </div>
+            <div class="footer">
+              <p>Best regards,<br>The MentorHub Team</p>
+              <p>Need help? Contact us at support@mentorhub.com</p>
+              <p style="margin-top: 20px;">
+                <a href="${loginUrl}" style="color: #3B82F6; text-decoration: none;">Login to MentorHub</a>
+              </p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+  };
+
+  try {
+    // Send email with timeout
+    await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email sending timeout')), 15000)
+      )
+    ]);
+    console.log(`Announcement email sent to ${email} (${targetRole}): ${name}`);
+  } catch (error: unknown) {
+    console.error('Error sending announcement email:', error);
+    const emailError = error as { message?: string; code?: string };
+    console.error('Email error details:', {
+      message: emailError.message,
+      code: emailError.code,
+      recipient: email,
+      role: targetRole
+    });
+    // Don't throw error - announcement should still succeed even if email fails
   }
 };
 
@@ -401,7 +669,13 @@ export const sendSessionNotificationEmail = async (
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    // Send email with timeout
+    await Promise.race([
+      transporter.sendMail(mailOptions),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email sending timeout')), 15000)
+      )
+    ]);
     console.log(`Session notification email sent to ${email} for session: ${sessionTitle}`);
   } catch (error: unknown) {
     console.error('Error sending session notification email:', error);

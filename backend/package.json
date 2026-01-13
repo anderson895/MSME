@@ -14,6 +14,7 @@
     "db:studio": "prisma studio",
     "db:truncate": "node scripts/truncate-tables.js",
     "db:seed": "ts-node prisma/seed.ts",
+    "db:seed:admin": "ts-node prisma/seed-admin.ts",
     "db:create": "node scripts/create-database.js",
     "start:prod": "npm run build && pm2 start dist/server.js --name mentoring-backend"
   },

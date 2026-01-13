@@ -41,6 +41,7 @@ const VideoCallPage: React.FC = () => {
   const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'disconnected' | 'failed'>('connecting');
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [attendanceMarked, setAttendanceMarked] = useState(false);
   const [chatMessages, setChatMessages] = useState<Array<{
     id: string;
     sender: string;
@@ -94,6 +95,47 @@ const VideoCallPage: React.FC = () => {
     const isActive = peerRef.current !== null || participants.length > 0;
     isCallActiveRef.current = isActive;
   }, [participants.length]);
+
+  // Mark attendance when mentee successfully connects to a session
+  // Only mark when mentee has actually joined (has local stream and peer connection established)
+  useEffect(() => {
+    let delayTimer: NodeJS.Timeout | null = null;
+
+    if (
+      sessionId && 
+      user?.role === 'MENTEE' && 
+      connectionState === 'connected' && 
+      !attendanceMarked &&
+      localStreamRef.current && // Must have local stream (camera/mic active)
+      (peerRef.current !== null || peerRefs.current.size > 0) // Must have peer connection
+    ) {
+      // Add a small delay to ensure the mentee has actually joined, not just navigated to the page
+      delayTimer = setTimeout(async () => {
+        // Double-check conditions after delay
+        if (
+          connectionState === 'connected' &&
+          localStreamRef.current &&
+          (peerRef.current !== null || peerRefs.current.size > 0) &&
+          !attendanceMarked
+        ) {
+          try {
+            await axios.post(`/sessions/${sessionId}/attendance`);
+            setAttendanceMarked(true);
+            console.log('[VideoCall] Attendance marked for session:', sessionId);
+          } catch (error) {
+            console.error('[VideoCall] Error marking attendance:', error);
+            // Don't fail the call if attendance marking fails
+          }
+        }
+      }, 3000); // Wait 3 seconds to ensure mentee has actually joined
+    }
+
+    return () => {
+      if (delayTimer) {
+        clearTimeout(delayTimer);
+      }
+    };
+  }, [sessionId, user?.role, connectionState, attendanceMarked]);
 
   // Set remote stream to video element when it becomes available
   useEffect(() => {
@@ -545,6 +587,7 @@ const VideoCallPage: React.FC = () => {
       // Store sessionId even in error case
       if (urlSessionId) {
         setSessionId(urlSessionId);
+        setAttendanceMarked(false); // Reset attendance flag when session changes
         console.log('[VideoCall] Session ID stored in error case:', urlSessionId);
       }
       

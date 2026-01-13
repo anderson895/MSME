@@ -161,6 +161,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: 30000, // 30 seconds timeout for registration (email sending is non-blocking)
       });
 
       const responseData = response.data.data;
@@ -182,6 +183,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         return responseData;
       }
     } catch (error: any) {
+      // Handle timeout errors specifically
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        throw new Error('Registration request timed out. The server is taking too long to respond. Please check your connection and try again.');
+      }
+      // Handle network errors
+      if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
+        throw new Error('Network error. Please check your internet connection and try again.');
+      }
       const message = error.response?.data?.message || error.message || "Registration failed";
       throw new Error(message);
     }

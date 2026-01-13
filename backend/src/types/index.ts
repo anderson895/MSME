@@ -33,6 +33,7 @@ export interface CreateSessionRequest {
   description?: string;
   date: string;
   duration: number;
+  meetingUrl?: string;
   menteeIds: string[];
 }
 

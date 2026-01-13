@@ -52,27 +52,28 @@ const MenteesPage: React.FC = () => {
         // Calculate total sessions
         const totalSessions = menteeSessions.length;
 
-        // Get completed sessions array
-        const completedSessionsList = menteeSessions.filter(
-          (session: any) => session.status === 'COMPLETED'
-        );
+        // Get sessions where mentee actually attended (attended: true) AND session is completed
+        const attendedSessionsList = menteeSessions.filter((session: any) => {
+          const sessionMentee = session.mentees?.find((sm: any) => sm.mentee?.id === mentee.id);
+          return session.status === 'COMPLETED' && sessionMentee?.attended === true;
+        });
         
-        // Calculate completed sessions count
-        const completedSessionsCount = completedSessionsList.length;
+        // Calculate attended sessions count
+        const attendedSessionsCount = attendedSessionsList.length;
 
-        // Calculate progress percentage (completed / total * 100)
+        // Calculate progress percentage (attended / total * 100)
         const progress = totalSessions > 0 
-          ? Math.round((completedSessionsCount / totalSessions) * 100)
+          ? Math.round((attendedSessionsCount / totalSessions) * 100)
           : 0;
 
-        // Find last active date from most recent completed session (not scheduled/future sessions)
-        const lastActiveSession = completedSessionsList
+        // Find last active date from most recent attended session (not scheduled/future sessions)
+        const lastActiveSession = attendedSessionsList
           .filter((session: any) => session.date)
           .sort((a: any, b: any) => 
             new Date(b.date).getTime() - new Date(a.date).getTime()
           )[0];
 
-        // Only use completed session dates, fallback to createdAt if no completed sessions
+        // Only use attended session dates, fallback to createdAt if no attended sessions
         const lastActive = lastActiveSession?.date 
           ? new Date(lastActiveSession.date).toISOString()
           : mentee.createdAt;

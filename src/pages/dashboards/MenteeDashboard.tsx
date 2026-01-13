@@ -13,6 +13,11 @@ interface MenteeStats {
     month: number;
     year: number;
     revenue: number;
+    category?: string;
+  }>;
+  categoryData?: Array<{
+    name: string;
+    value: number;
   }>;
 }
 
@@ -50,6 +55,7 @@ const MenteeDashboard: React.FC = () => {
   const [showSalesModal, setShowSalesModal] = useState(false);
   const [salesFormData, setSalesFormData] = useState({
     revenue: '',
+    category: 'Other',
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear()
   });
@@ -103,6 +109,7 @@ const MenteeDashboard: React.FC = () => {
     try {
       await axios.post('/analytics/sales', {
         revenue: parseFloat(salesFormData.revenue),
+        category: salesFormData.category,
         month: salesFormData.month,
         year: salesFormData.year
       });
@@ -110,6 +117,7 @@ const MenteeDashboard: React.FC = () => {
       // Reset form
       setSalesFormData({
         revenue: '',
+        category: 'Other',
         month: new Date().getMonth() + 1,
         year: new Date().getFullYear()
       });
@@ -117,9 +125,12 @@ const MenteeDashboard: React.FC = () => {
       
       // Refresh stats to show new data
       await fetchStats();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error submitting sales data:', error);
-      setSalesError(error.response?.data?.message || 'Failed to save sales data. Please try again.');
+      const errorMessage = error && typeof error === 'object' && 'response' in error
+        ? (error as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to save sales data. Please try again.'
+        : 'Failed to save sales data. Please try again.';
+      setSalesError(errorMessage);
     } finally {
       setSubmittingSales(false);
     }
@@ -204,12 +215,19 @@ const MenteeDashboard: React.FC = () => {
     revenue: data.revenue
   })) || [];
 
-  // Sample category data for pie chart
-  const categoryData = [
-    { name: 'Product Sales', value: 35, color: '#3B82F6' },
-    { name: 'Service Sales', value: 30, color: '#10B981' },
-    { name: 'Consulting', value: 20, color: '#F59E0B' },
-    { name: 'Other', value: 15, color: '#6366F1' }
+  // Category data from backend or calculate from sales data
+  const categoryData = stats?.categoryData ? stats.categoryData.map((item, index) => {
+    const colors = ['#3B82F6', '#10B981', '#F59E0B', '#6366F1'];
+    return {
+      name: item.name,
+      value: item.value,
+      color: colors[index % colors.length]
+    };
+  }) : [
+    { name: 'Product Sales', value: 0, color: '#3B82F6' },
+    { name: 'Service Sales', value: 0, color: '#10B981' },
+    { name: 'Consulting', value: 0, color: '#F59E0B' },
+    { name: 'Other', value: 0, color: '#6366F1' }
   ];
 
   return (
@@ -281,7 +299,10 @@ const MenteeDashboard: React.FC = () => {
                 cx="50%"
                 cy="50%"
                 labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent ?? 0 * 100).toFixed(0)}%`}
+                label={({ name, percent }) => {
+                  const percentage = ((percent ?? 0) * 100).toFixed(0);
+                  return percentage === '0' ? '' : `${name} ${percentage}%`;
+                }}
                 outerRadius={80}
                 fill="#8884d8"
                 dataKey="value"
@@ -477,6 +498,7 @@ const MenteeDashboard: React.FC = () => {
                   setSalesError('');
                   setSalesFormData({
                     revenue: '',
+                    category: 'Other',
                     month: new Date().getMonth() + 1,
                     year: new Date().getFullYear()
                   });
@@ -509,6 +531,23 @@ const MenteeDashboard: React.FC = () => {
                     placeholder="0.00"
                     required
                   />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Category
+                  </label>
+                  <select
+                    value={salesFormData.category}
+                    onChange={(e) => setSalesFormData({ ...salesFormData, category: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="Product Sales">Product Sales</option>
+                    <option value="Service Sales">Service Sales</option>
+                    <option value="Consulting">Consulting</option>
+                    <option value="Other">Other</option>
+                  </select>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
@@ -562,6 +601,7 @@ const MenteeDashboard: React.FC = () => {
                     setSalesError('');
                     setSalesFormData({
                       revenue: '',
+                      category: 'Other',
                       month: new Date().getMonth() + 1,
                       year: new Date().getFullYear()
                     });

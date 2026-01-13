@@ -7,6 +7,9 @@ import { useAuth } from './hooks/useAuth';
 // Layout components
 import Layout from './components/Layout/Layout';
 
+// Public landing page
+import LandingPage from './pages/LandingPage';
+
 // Authentication pages
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
@@ -153,16 +156,16 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; roles?: string[] }> 
 const getAccessibleRoutes = (userRole: string) => {
   const routes = {
     ADMIN: [
-      '/admin', '/users', '/sessions', '/announcements', 
-      '/calendar', '/resources', '/chat', '/profile', '/video-call'
+      '/app/admin', '/app/users', '/app/sessions', '/app/announcements', 
+      '/app/calendar', '/app/resources', '/app/chat', '/app/profile', '/app/video-call'
     ],
     MENTOR: [
-      '/mentor', '/mentor/mentees', '/sessions', '/announcements', '/calendar', 
-      '/resources', '/chat', '/profile', '/video-call'
+      '/app/mentor', '/app/mentor/mentees', '/app/sessions', '/app/announcements', '/app/calendar', 
+      '/app/resources', '/app/chat', '/app/profile', '/app/video-call'
     ],
     MENTEE: [
-      '/mentee', '/mentee/mentors', '/calendar', '/resources', 
-      '/chat', '/profile', '/video-call'
+      '/app/mentee', '/app/mentee/mentors', '/app/calendar', '/app/resources', 
+      '/app/chat', '/app/profile', '/app/video-call'
     ]
   };
   
@@ -203,7 +206,7 @@ const NavigationBlocker: React.FC = () => {
     const isCallActive = sessionStorage.getItem('isCallActive') === 'true';
     const allowNavigation = sessionStorage.getItem('allowNavigation') === 'true';
     
-    if (isCallActive && !allowNavigation && prevLocationRef.current === '/video-call' && location.pathname !== '/video-call') {
+    if (isCallActive && !allowNavigation && prevLocationRef.current === '/app/video-call' && location.pathname !== '/app/video-call') {
       // Block navigation and show confirmation
       const confirmed = window.confirm('You have an active call. Ending the call will disconnect you. Do you want to end the call and navigate?');
       if (confirmed) {
@@ -213,7 +216,7 @@ const NavigationBlocker: React.FC = () => {
         // Navigation will proceed naturally
       } else {
         // Navigate back to video-call page
-        navigate('/video-call', { replace: true });
+        navigate('/app/video-call', { replace: true });
       }
     } else if (allowNavigation) {
       // Clear the allow navigation flag after use
@@ -234,11 +237,11 @@ const AppRoutes: React.FC = () => {
     
     switch (user.role) {
       case 'ADMIN':
-        return '/admin';
+        return '/app/admin';
       case 'MENTOR':
-        return '/mentor';
+        return '/app/mentor';
       case 'MENTEE':
-        return '/mentee';
+        return '/app/mentee';
       default:
         return '/login';
     }
@@ -248,128 +251,129 @@ const AppRoutes: React.FC = () => {
     <>
       <NavigationBlocker />
       <Routes>
-      {/* Public routes */}
-      <Route path="/login" element={!user ? <LoginPage /> : <Navigate to={getDashboard()} />} />
-      <Route path="/register" element={!user ? <RegisterPage /> : <Navigate to={getDashboard()} />} />
-      <Route path="/verify-email" element={<EmailVerificationPage />} />
-      <Route path="/forgot-password" element={!user ? <ForgotPasswordPage /> : <Navigate to={getDashboard()} />} />
-      <Route path="/reset-password" element={!user ? <ResetPasswordPage /> : <Navigate to={getDashboard()} />} />
-      
-      {/* Protected routes with layout */}
-      <Route path="/" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
-      }>
-        {/* Redirect root to appropriate dashboard */}
-        <Route index element={<Navigate to={getDashboard()} replace />} />
+        {/* Public routes */}
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={!user ? <LoginPage /> : <Navigate to={getDashboard()} />} />
+        <Route path="/register" element={!user ? <RegisterPage /> : <Navigate to={getDashboard()} />} />
+        <Route path="/verify-email" element={<EmailVerificationPage />} />
+        <Route path="/forgot-password" element={!user ? <ForgotPasswordPage /> : <Navigate to={getDashboard()} />} />
+        <Route path="/reset-password" element={!user ? <ResetPasswordPage /> : <Navigate to={getDashboard()} />} />
         
-        {/* Admin-only routes */}
-        <Route path="admin" element={
-          <RouteGuard path="/admin">
-            <ProtectedRoute roles={['ADMIN']}>
-              <AdminDashboard />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        <Route path="users" element={
-          <RouteGuard path="/users">
-            <ProtectedRoute roles={['ADMIN']}>
-              <UsersPage />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        <Route path="announcements" element={
-          <RouteGuard path="/announcements">
-            <ProtectedRoute roles={['ADMIN', 'MENTOR']}>
-              <AnnouncementsWrapper />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        
-        {/* Mentor-only routes */}
-        <Route path="mentor" element={
-          <RouteGuard path="/mentor">
-            <ProtectedRoute roles={['MENTOR']}>
-              <MentorDashboard />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        <Route path="mentor/mentees" element={
-          <RouteGuard path="/mentor/mentees">
-            <ProtectedRoute roles={['MENTOR']}>
-              <MenteesPage />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        
-        {/* Mentee-only routes */}
-        <Route path="mentee" element={
-          <RouteGuard path="/mentee">
-            <ProtectedRoute roles={['MENTEE']}>
-              <MenteeDashboard />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        <Route path="mentee/mentors" element={
-          <RouteGuard path="/mentee/mentors">
-            <ProtectedRoute roles={['MENTEE']}>
-              <MentorsPage />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        
-        {/* Sessions route - accessible by Admin and Mentor only */}
-        <Route path="sessions" element={
-          <RouteGuard path="/sessions">
-            <ProtectedRoute roles={['ADMIN', 'MENTOR']}>
-              <SessionsPage />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        
-        {/* Shared routes - accessible by all authenticated users */}
-        <Route path="calendar" element={
-          <RouteGuard path="/calendar">
-            <ProtectedRoute>
-              <CalendarPage />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        <Route path="video-call" element={
-          <RouteGuard path="/video-call">
-            <ProtectedRoute>
-              <VideoCallPage />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        <Route path="resources" element={
-          <RouteGuard path="/resources">
-            <ProtectedRoute>
-              <ResourcesPage />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        <Route path="chat" element={
-          <RouteGuard path="/chat">
-            <ProtectedRoute>
-              <ChatPage />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-        <Route path="profile" element={
-          <RouteGuard path="/profile">
-            <ProtectedRoute>
-              <ProfilePage />
-            </ProtectedRoute>
-          </RouteGuard>
-        } />
-      </Route>
+        {/* Protected routes with layout under /app */}
+        <Route path="/app" element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        }>
+          {/* Redirect /app to appropriate dashboard */}
+          <Route index element={<Navigate to={getDashboard()} replace />} />
+          
+          {/* Admin-only routes */}
+          <Route path="admin" element={
+            <RouteGuard path="/app/admin">
+              <ProtectedRoute roles={['ADMIN']}>
+                <AdminDashboard />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          <Route path="users" element={
+            <RouteGuard path="/app/users">
+              <ProtectedRoute roles={['ADMIN']}>
+                <UsersPage />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          <Route path="announcements" element={
+            <RouteGuard path="/app/announcements">
+              <ProtectedRoute roles={['ADMIN', 'MENTOR']}>
+                <AnnouncementsWrapper />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          
+          {/* Mentor-only routes */}
+          <Route path="mentor" element={
+            <RouteGuard path="/app/mentor">
+              <ProtectedRoute roles={['MENTOR']}>
+                <MentorDashboard />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          <Route path="mentor/mentees" element={
+            <RouteGuard path="/app/mentor/mentees">
+              <ProtectedRoute roles={['MENTOR']}>
+                <MenteesPage />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          
+          {/* Mentee-only routes */}
+          <Route path="mentee" element={
+            <RouteGuard path="/app/mentee">
+              <ProtectedRoute roles={['MENTEE']}>
+                <MenteeDashboard />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          <Route path="mentee/mentors" element={
+            <RouteGuard path="/app/mentee/mentors">
+              <ProtectedRoute roles={['MENTEE']}>
+                <MentorsPage />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          
+          {/* Sessions route - accessible by Admin and Mentor only */}
+          <Route path="sessions" element={
+            <RouteGuard path="/app/sessions">
+              <ProtectedRoute roles={['ADMIN', 'MENTOR']}>
+                <SessionsPage />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          
+          {/* Shared routes - accessible by all authenticated users */}
+          <Route path="calendar" element={
+            <RouteGuard path="/app/calendar">
+              <ProtectedRoute>
+                <CalendarPage />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          <Route path="video-call" element={
+            <RouteGuard path="/app/video-call">
+              <ProtectedRoute>
+                <VideoCallPage />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          <Route path="resources" element={
+            <RouteGuard path="/app/resources">
+              <ProtectedRoute>
+                <ResourcesPage />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          <Route path="chat" element={
+            <RouteGuard path="/app/chat">
+              <ProtectedRoute>
+                <ChatPage />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+          <Route path="profile" element={
+            <RouteGuard path="/app/profile">
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            </RouteGuard>
+          } />
+        </Route>
 
-      {/* Error routes */}
-      <Route path="/unauthorized" element={<UnauthorizedPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        {/* Error routes */}
+        <Route path="/unauthorized" element={<UnauthorizedPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </>
   );
 };

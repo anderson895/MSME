@@ -30,6 +30,12 @@ enum SessionStatus {
   CANCELLED
 }
 
+enum ExperienceLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
 model User {
   id           String     @id @default(cuid())
   name         String
@@ -46,6 +52,7 @@ model User {
   businessPermitUrl String?  // For mentees - business permit document
   businessPermitFileName String?  // Original filename
   businessPermitFileSize Int?  // File size in bytes
+  experienceLevel ExperienceLevel?  // For mentees - Beginner, Intermediate, Advanced
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -60,6 +67,7 @@ model User {
   receivedRatings   Rating[]      @relation("MentorRatings")
   salesData         SalesData[]
   groupMembers      GroupMember[]
+  createdGroups     ChatGroup[]     @relation("GroupCreator")
   notifications     Notification[]
   readAnnouncements AnnouncementRead[]
 
@@ -89,6 +97,7 @@ model SessionMentee {
   id        String @id @default(cuid())
   sessionId String
   menteeId  String
+  attended  Boolean @default(false)  // Track if mentee actually attended the session
 
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   mentee  User    @relation(fields: [menteeId], references: [id], onDelete: Cascade)
@@ -145,9 +154,11 @@ model ChatGroup {
   name        String
   description String?
   isGeneral   Boolean  @default(false)
+  createdBy   String?  // User ID who created the group (null for general groups)
   createdAt   DateTime @default(now())
 
-  members  GroupMember[]
+  creator User?        @relation("GroupCreator", fields: [createdBy], references: [id])
+  members GroupMember[]
   messages Message[]
 
   @@map("chat_groups")
@@ -172,6 +183,7 @@ model Message {
   senderId   String
   receiverId String?  // For direct messages
   groupId    String?  // For group messages
+  deletedAt  DateTime? // Soft delete timestamp
   createdAt  DateTime @default(now())
 
   sender   User       @relation("MessageSender", fields: [senderId], references: [id])
@@ -200,6 +212,7 @@ model SalesData {
   id       String @id @default(cuid())
   userId   String
   revenue  Float
+  category String @default("Other") // Product Sales, Service Sales, Consulting, Other
   month    Int
   year     Int
   createdAt DateTime @default(now())

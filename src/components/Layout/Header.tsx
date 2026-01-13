@@ -55,7 +55,7 @@ const Header: React.FC = () => {
   }, []);
 
   // Hide "Schedule Session" button on calendar page (view-only)
-  const isCalendarPage = location.pathname === '/calendar';
+  const isCalendarPage = location.pathname === '/app/calendar';
   const showScheduleButton = !isCalendarPage && (user?.role === 'ADMIN' || user?.role === 'MENTOR');
 
   useEffect(() => {
@@ -148,7 +148,7 @@ const Header: React.FC = () => {
 
     // Handle navigation based on notification type
     if (notification.title === 'New Message') {
-      navigate('/chat');
+      navigate('/app/chat');
       
       // Use senderId if available, otherwise extract from message
       const senderId = notification.senderId;
@@ -195,23 +195,31 @@ const Header: React.FC = () => {
           } catch (error) {
             console.warn('[Notification] Failed to parse URL, trying manual extraction:', error);
             // If URL parsing fails, try to extract path manually
-            const match = socketNotification.meetingUrl.match(/\/video-call\?.*/);
+            const match = socketNotification.meetingUrl.match(/\/app\/video-call\?.*/);
             if (match) {
               urlToNavigate = match[0];
               console.log('[Notification] Extracted path using regex:', urlToNavigate);
             } else {
-              // Fallback: just use the path part
+              // Fallback: just use the path part and ensure /app prefix
               urlToNavigate = socketNotification.meetingUrl.replace(/^https?:\/\/[^/]+/, '');
+              // If path doesn't start with /app, add it
+              if (!urlToNavigate.startsWith('/app')) {
+                urlToNavigate = urlToNavigate.replace(/^\//, '/app/');
+              }
               console.log('[Notification] Using fallback path extraction:', urlToNavigate);
             }
           }
         }
         
+        // Ensure path starts with /app
+        if (!urlToNavigate.startsWith('/app')) {
+          urlToNavigate = urlToNavigate.replace(/^\//, '/app/');
+        }
         console.log('[Notification] Navigating to:', urlToNavigate);
         // Navigate in the same tab (don't open new tab for better context sharing)
         navigate(urlToNavigate);
       } else if (socketNotification.sessionId) {
-        const videoCallUrl = `/video-call?sessionId=${socketNotification.sessionId}`;
+        const videoCallUrl = `/app/video-call?sessionId=${socketNotification.sessionId}`;
         console.log('[Notification] No meetingUrl, using sessionId to navigate:', videoCallUrl);
         // Fallback: navigate to video call with sessionId
         navigate(videoCallUrl);
@@ -219,17 +227,17 @@ const Header: React.FC = () => {
         console.warn('[Notification] No meetingUrl or sessionId, navigating to calendar');
         // For database notifications without sessionId/meetingUrl, navigate to calendar
         // where they can see and join active sessions
-        navigate('/calendar');
+        navigate('/app/calendar');
       }
     } else if (notification.title === 'New Announcement' || notification.title.includes('Announcement')) {
       // Handle announcement notifications - navigate to announcements page
       const socketNotification = notification as SocketNotification;
       if (socketNotification.announcementId) {
         // Navigate to announcements page (could add specific announcement ID in future)
-        navigate('/announcements');
+        navigate('/app/announcements');
       } else {
         // Navigate to announcements page
-        navigate('/announcements');
+        navigate('/app/announcements');
       }
     } else {
       // For other notification types, just close the dropdown
@@ -379,24 +387,24 @@ const Header: React.FC = () => {
                 <button
                   onClick={() => {
                     // Check if call is active before navigating
-                    if (isCallActive && location.pathname === '/video-call') {
+                    if (isCallActive && location.pathname === '/app/video-call') {
                       const confirmed = window.confirm('You have an active call. Ending the call will disconnect you. Do you want to end the call and navigate?');
                       if (confirmed) {
                         sessionStorage.setItem('isCallActive', 'false');
                         sessionStorage.setItem('allowNavigation', 'true');
-                        navigate('/sessions');
+                        navigate('/app/sessions');
                       }
                     } else {
-                      navigate('/sessions');
+                      navigate('/app/sessions');
                     }
                   }}
                   className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
-                    isCallActive && location.pathname === '/video-call'
+                    isCallActive && location.pathname === '/app/video-call'
                       ? 'bg-gray-400 text-white cursor-not-allowed'
                       : 'bg-blue-600 text-white hover:bg-blue-700'
                   }`}
                   title="Create Training Session"
-                  disabled={isCallActive && location.pathname === '/video-call'}
+                  disabled={isCallActive && location.pathname === '/app/video-call'}
                 >
                   <Plus className="h-4 w-4" />
                   <span>Schedule Session</span>

@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import axios from 'axios';
-import { Search, UserCheck, Users, FileText, Eye, X, MessageCircle, Video, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Search, UserCheck, Users, FileText, Eye, X, MessageCircle, Video, TrendingUp, TrendingDown, Minus, ArrowUp, ArrowDown, AlertTriangle } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface User {
@@ -15,20 +15,33 @@ interface User {
   businessPermitUrl?: string;
   businessPermitFileName?: string;
   businessPermitFileSize?: number;
+  experienceLevel?: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
+  attendedSessions?: number;
   createdAt: string;
 }
 
 const UsersPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
+  const [selectedExperienceLevel, setSelectedExperienceLevel] = useState('');
   const [viewingPermit, setViewingPermit] = useState<{ userId: string; url: string; contentType: string } | null>(null);
   const [viewingRevenue, setViewingRevenue] = useState<{ userId: string; userName: string } | null>(null);
   const [revenueData, setRevenueData] = useState<Array<{ month: number; year: number; revenue: number }>>([]);
   const [loadingRevenue, setLoadingRevenue] = useState(false);
+  const [showPromotionConfirm, setShowPromotionConfirm] = useState<{ userId: string; userName: string; currentLevel?: string; nextLevel: string; action: 'promote' | 'downgrade' } | null>(null);
+
+  // Read status from URL query parameter on mount
+  useEffect(() => {
+    const statusParam = searchParams.get('status');
+    if (statusParam) {
+      setSelectedStatus(statusParam);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     fetchUsers();
@@ -54,6 +67,100 @@ const UsersPage: React.FC = () => {
     } catch (error) {
       console.error('Error updating user status:', error);
       alert('Failed to update user status. Please try again.');
+    }
+  };
+
+  const handlePromoteClick = (userId: string, currentLevel?: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED') => {
+    let nextLevel: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
+    
+    if (!currentLevel || currentLevel === 'BEGINNER') {
+      nextLevel = 'INTERMEDIATE';
+    } else if (currentLevel === 'INTERMEDIATE') {
+      nextLevel = 'ADVANCED';
+    } else {
+      alert('User is already at the highest level (Advanced)');
+      return;
+    }
+
+    const user = users.find(u => u.id === userId);
+    if (user) {
+      setShowPromotionConfirm({
+        userId,
+        userName: user.name,
+        currentLevel,
+        nextLevel,
+        action: 'promote'
+      });
+    }
+  };
+
+  const handleDowngradeClick = (userId: string, currentLevel?: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED') => {
+    let nextLevel: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
+    
+    if (!currentLevel || currentLevel === 'ADVANCED') {
+      nextLevel = 'INTERMEDIATE';
+    } else if (currentLevel === 'INTERMEDIATE') {
+      nextLevel = 'BEGINNER';
+    } else {
+      alert('User is already at the lowest level (Beginner)');
+      return;
+    }
+
+    const user = users.find(u => u.id === userId);
+    if (user) {
+      setShowPromotionConfirm({
+        userId,
+        userName: user.name,
+        currentLevel,
+        nextLevel,
+        action: 'downgrade'
+      });
+    }
+  };
+
+  const updateExperienceLevel = async () => {
+    if (!showPromotionConfirm) return;
+
+    try {
+      const { userId, nextLevel, action } = showPromotionConfirm;
+      
+      await axios.put(`/users/${userId}/experience-level`, { experienceLevel: nextLevel });
+      setUsers(users.map(user => 
+        user.id === userId ? { ...user, experienceLevel: nextLevel as 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' } : user
+      ));
+      const actionText = action === 'promote' ? 'promoted' : 'downgraded';
+      alert(`Successfully ${actionText} ${showPromotionConfirm.userName} to ${getExperienceLevelLabel(nextLevel)}`);
+      setShowPromotionConfirm(null);
+    } catch (error: any) {
+      console.error(`Error ${showPromotionConfirm.action}ing experience level:`, error);
+      const actionText = showPromotionConfirm.action === 'promote' ? 'promote' : 'downgrade';
+      alert(error.response?.data?.message || `Failed to ${actionText} experience level. Please try again.`);
+    }
+  };
+
+  const getExperienceLevelColor = (level?: string) => {
+    switch (level) {
+      case 'BEGINNER':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'INTERMEDIATE':
+        return 'bg-blue-100 text-blue-800';
+      case 'ADVANCED':
+        return 'bg-green-100 text-green-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getExperienceLevelLabel = (level?: string) => {
+    switch (level) {
+      case 'BEGINNER':
+        return 'Beginner';
+      case 'INTERMEDIATE':
+        return 'Intermediate';
+      case 'ADVANCED':
+        return 'Advanced';
+      default:
+        return 'Not Set';
     }
   };
 
@@ -151,7 +258,10 @@ const UsersPage: React.FC = () => {
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = !selectedRole || user.role === selectedRole;
     const matchesStatus = !selectedStatus || user.status === selectedStatus;
-    return matchesSearch && matchesRole && matchesStatus;
+    const matchesExperienceLevel = !selectedExperienceLevel || 
+      (selectedExperienceLevel === 'NOT_SET' && !user.experienceLevel) ||
+      (selectedExperienceLevel !== 'NOT_SET' && user.experienceLevel === selectedExperienceLevel);
+    return matchesSearch && matchesRole && matchesStatus && matchesExperienceLevel;
   });
 
   const getRoleColor = (role: string) => {
@@ -301,13 +411,34 @@ const UsersPage: React.FC = () => {
 
         <select
           value={selectedStatus}
-          onChange={(e) => setSelectedStatus(e.target.value)}
+          onChange={(e) => {
+            const newStatus = e.target.value;
+            setSelectedStatus(newStatus);
+            // Update URL query parameter
+            if (newStatus) {
+              setSearchParams({ status: newStatus });
+            } else {
+              setSearchParams({});
+            }
+          }}
           className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">All Status</option>
           <option value="ACTIVE">Active</option>
           <option value="INACTIVE">Inactive</option>
           <option value="PENDING_APPROVAL">Pending Approval</option>
+        </select>
+
+        <select
+          value={selectedExperienceLevel}
+          onChange={(e) => setSelectedExperienceLevel(e.target.value)}
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="">All Experience Levels</option>
+          <option value="NOT_SET">Not Set</option>
+          <option value="BEGINNER">Beginner</option>
+          <option value="INTERMEDIATE">Intermediate</option>
+          <option value="ADVANCED">Advanced</option>
         </select>
       </div>
 
@@ -331,6 +462,12 @@ const UsersPage: React.FC = () => {
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Business Permit
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Experience Level
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Attended Sessions
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
@@ -381,6 +518,46 @@ const UsersPage: React.FC = () => {
                       <span className="text-xs text-gray-400">No permit</span>
                     ) : (
                       <span className="text-xs text-gray-400">-</span>
+                    )}
+                  </td>
+                  
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    {user.role === 'MENTEE' ? (
+                      <div className="flex items-center space-x-2">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getExperienceLevelColor(user.experienceLevel)}`}>
+                          {getExperienceLevelLabel(user.experienceLevel)}
+                        </span>
+                        <div className="flex items-center space-x-1">
+                          {user.experienceLevel !== 'ADVANCED' && (
+                            <button
+                              onClick={() => handlePromoteClick(user.id, user.experienceLevel)}
+                              className="inline-flex items-center px-2 py-1 text-xs font-medium text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+                              title={`Promote to ${user.experienceLevel === 'BEGINNER' || !user.experienceLevel ? 'Intermediate' : 'Advanced'}`}
+                            >
+                              <ArrowUp className="h-3 w-3" />
+                            </button>
+                          )}
+                          {user.experienceLevel && user.experienceLevel !== 'BEGINNER' && (
+                            <button
+                              onClick={() => handleDowngradeClick(user.id, user.experienceLevel)}
+                              className="inline-flex items-center px-2 py-1 text-xs font-medium text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+                              title={`Downgrade to ${user.experienceLevel === 'ADVANCED' ? 'Intermediate' : 'Beginner'}`}
+                            >
+                              <ArrowDown className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
+                  </td>
+                  
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {user.role === 'MENTEE' ? (
+                      <span>{user.attendedSessions ?? 0} sessions</span>
+                    ) : (
+                      <span className="text-gray-400">-</span>
                     )}
                   </td>
                   
@@ -523,6 +700,72 @@ const UsersPage: React.FC = () => {
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Experience Level Update Confirmation Modal */}
+      {showPromotionConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex items-center space-x-3">
+                <div className={`p-2 rounded-full ${showPromotionConfirm.action === 'promote' ? 'bg-yellow-100' : 'bg-orange-100'}`}>
+                  <AlertTriangle className={`h-5 w-5 ${showPromotionConfirm.action === 'promote' ? 'text-yellow-600' : 'text-orange-600'}`} />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {showPromotionConfirm.action === 'promote' ? 'Confirm Promotion' : 'Confirm Downgrade'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowPromotionConfirm(null)}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-gray-700 mb-4">
+                Are you sure you want to {showPromotionConfirm.action === 'promote' ? 'promote' : 'downgrade'}{' '}
+                <span className="font-semibold">{showPromotionConfirm.userName}</span> from{' '}
+                <span className="font-semibold">{getExperienceLevelLabel(showPromotionConfirm.currentLevel || 'BEGINNER')}</span> to{' '}
+                <span className="font-semibold">{getExperienceLevelLabel(showPromotionConfirm.nextLevel)}</span>?
+              </p>
+              <p className="text-sm text-gray-500 mb-6">
+                {showPromotionConfirm.action === 'promote' 
+                  ? "This action will update the mentee's experience level. Make sure they have attended the required number of sessions."
+                  : "This action will downgrade the mentee's experience level. This can be reversed if needed."}
+              </p>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setShowPromotionConfirm(null)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={updateExperienceLevel}
+                  className={`px-4 py-2 rounded-lg transition-colors flex items-center space-x-2 ${
+                    showPromotionConfirm.action === 'promote'
+                      ? 'bg-green-600 text-white hover:bg-green-700'
+                      : 'bg-red-600 text-white hover:bg-red-700'
+                  }`}
+                >
+                  {showPromotionConfirm.action === 'promote' ? (
+                    <>
+                      <ArrowUp className="h-4 w-4" />
+                      <span>Confirm Promotion</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowDown className="h-4 w-4" />
+                      <span>Confirm Downgrade</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

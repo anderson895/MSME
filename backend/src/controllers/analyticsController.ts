@@ -11,21 +11,22 @@ export const getDashboardAnalytics = async (req: AuthRequest, res: Response) => 
     const { user } = req;
 
     if (user.role === 'ADMIN') {
-      // Admin analytics
       const [
         totalUsers,
         totalMentors,
         totalMentees,
         totalSessions,
         completedSessions,
-        totalResources
+        totalResources,
+        pendingApprovals
       ] = await Promise.all([
         prisma.user.count(),
         prisma.user.count({ where: { role: 'MENTOR' } }),
         prisma.user.count({ where: { role: 'MENTEE' } }),
         prisma.session.count(),
         prisma.session.count({ where: { status: 'COMPLETED' } }),
-        prisma.resource.count()
+        prisma.resource.count(),
+        prisma.user.count({ where: { status: 'PENDING_APPROVAL' } })
       ]);
 
       // Monthly user registrations
@@ -47,6 +48,30 @@ export const getDashboardAnalytics = async (req: AuthRequest, res: Response) => 
         count: Number(item.count)
       }));
 
+      // Fetch all MSME (mentee) sales data and aggregate by category
+      const allMenteeSalesData = await prisma.salesData.findMany({
+        where: {
+          user: {
+            role: 'MENTEE'
+          }
+        }
+      });
+
+      // Calculate category totals for all MSMEs
+      const msmeCategoryTotals: Record<string, number> = {};
+      allMenteeSalesData.forEach((data) => {
+        const category = data.category || 'Other';
+        msmeCategoryTotals[category] = (msmeCategoryTotals[category] || 0) + data.revenue;
+      });
+
+      // Format category data for pie chart
+      const msmeCategoryData = [
+        { name: 'Product Sales', value: msmeCategoryTotals['Product Sales'] || 0 },
+        { name: 'Service Sales', value: msmeCategoryTotals['Service Sales'] || 0 },
+        { name: 'Consulting', value: msmeCategoryTotals['Consulting'] || 0 },
+        { name: 'Other', value: msmeCategoryTotals['Other'] || 0 }
+      ];
+
       res.json({
         success: true,
         data: {
@@ -56,9 +81,11 @@ export const getDashboardAnalytics = async (req: AuthRequest, res: Response) => 
             totalMentees: Number(totalMentees),
             totalSessions: Number(totalSessions),
             completedSessions: Number(completedSessions),
-            totalResources: Number(totalResources)
+            totalResources: Number(totalResources),
+            pendingApprovals: Number(pendingApprovals)
           },
-          monthlyRegistrations
+          monthlyRegistrations,
+          msmeCategoryData
         }
       });
     } else if (user.role === 'MENTOR') {
@@ -105,15 +132,31 @@ export const getDashboardAnalytics = async (req: AuthRequest, res: Response) => 
       // Mentee analytics - sales data
       const salesData = await prisma.salesData.findMany({
         where: { userId: user.id },
-        orderBy: { month: 'asc' }
+        orderBy: [{ year: 'asc' }, { month: 'asc' }]
       });
 
       const totalRevenue = salesData.reduce((sum, data) => sum + data.revenue, 0);
       const averageMonthlyRevenue = salesData.length > 0 ? totalRevenue / salesData.length : 0;
 
+      // Calculate category totals
+      const categoryTotals: Record<string, number> = {};
+      salesData.forEach((data) => {
+        const category = data.category || 'Other';
+        categoryTotals[category] = (categoryTotals[category] || 0) + data.revenue;
+      });
+
+      // Format category data for pie chart
+      const categoryData = [
+        { name: 'Product Sales', value: categoryTotals['Product Sales'] || 0 },
+        { name: 'Service Sales', value: categoryTotals['Service Sales'] || 0 },
+        { name: 'Consulting', value: categoryTotals['Consulting'] || 0 },
+        { name: 'Other', value: categoryTotals['Other'] || 0 }
+      ];
+
       const attendedSessionsCount = await prisma.sessionMentee.count({
         where: {
           menteeId: user.id,
+          attended: true,
           session: {
             status: 'COMPLETED'
           }
@@ -138,6 +181,7 @@ export const getDashboardAnalytics = async (req: AuthRequest, res: Response) => 
           salesData,
           totalRevenue,
           averageMonthlyRevenue,
+          categoryData,
           attendedSessions: Number(attendedSessionsCount),
           upcomingSessions: Number(upcomingSessionsCount)
         }
@@ -207,8 +251,12 @@ export const getMenteeAnalytics = async (req: AuthRequest, res: Response) => {
 
 export const createSalesData = async (req: AuthRequest, res: Response) => {
   try {
-    const { revenue, month, year } = req.body;
+    const { revenue, category, month, year } = req.body;
     const userId = req.user.id;
+
+    // Validate category
+    const validCategories = ['Product Sales', 'Service Sales', 'Consulting', 'Other'];
+    const salesCategory = validCategories.includes(category) ? category : 'Other';
 
     const salesData = await prisma.salesData.upsert({
       where: {
@@ -218,10 +266,14 @@ export const createSalesData = async (req: AuthRequest, res: Response) => {
           year
         }
       },
-      update: { revenue },
+      update: { 
+        revenue,
+        category: salesCategory
+      },
       create: {
         userId,
         revenue,
+        category: salesCategory,
         month,
         year
       }
@@ -254,7 +306,7 @@ export const getRecentActivity = async (req: AuthRequest, res: Response) => {
     }
 
     // Fetch recent activities (last 10 of each type)
-    const [recentMentors, recentSessions, recentResources] = await Promise.all([
+    const [recentMentors, recentMentees, recentSessions, recentResources] = await Promise.all([
       // Recent mentor registrations
       prisma.user.findMany({
         where: {
@@ -269,6 +321,23 @@ export const getRecentActivity = async (req: AuthRequest, res: Response) => {
           id: true,
           name: true,
           email: true,
+          createdAt: true
+        }
+      }),
+      // Recent mentee registrations (include all statuses to show new registrations)
+      prisma.user.findMany({
+        where: {
+          role: 'MENTEE'
+        },
+        orderBy: {
+          createdAt: 'desc'
+        },
+        take: 10,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          status: true,
           createdAt: true
         }
       }),
@@ -318,6 +387,15 @@ export const getRecentActivity = async (req: AuthRequest, res: Response) => {
         title: 'New mentor registered',
         description: mentor.name,
         timestamp: mentor.createdAt,
+        icon: 'users' as const
+      })),
+      ...recentMentees.map(mentee => ({
+        type: 'MENTEE_REGISTERED' as const,
+        title: mentee.status === 'PENDING_APPROVAL' 
+          ? 'New mentee registered (Pending Approval)' 
+          : 'New mentee registered',
+        description: mentee.name,
+        timestamp: mentee.createdAt,
         icon: 'users' as const
       })),
       ...recentSessions.map(session => ({

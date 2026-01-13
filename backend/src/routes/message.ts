@@ -6,7 +6,12 @@ import {
   getChatUsers,
   markMessagesAsRead,
   createGroup,
-  addGroupMembers
+  addGroupMembers,
+  deleteMessages,
+  getGroupMembers,
+  leaveGroup,
+  deleteGroup,
+  removeGroupMember
 } from '../controllers/messageController';
 
 const router = Router();
@@ -153,5 +158,117 @@ router.post('/groups', authenticateToken, createGroup);
  *         description: Members added successfully
  */
 router.post('/groups/:groupId/members', authenticateToken, addGroupMembers);
+
+/**
+ * @swagger
+ * /api/messages/delete:
+ *   delete:
+ *     tags: [Messages]
+ *     summary: Delete messages (soft delete)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               userId:
+ *                 type: string
+ *                 description: User ID for direct messages
+ *               groupId:
+ *                 type: string
+ *                 description: Group ID for group messages
+ *     responses:
+ *       200:
+ *         description: Messages deleted successfully
+ */
+router.delete('/delete', authenticateToken, deleteMessages);
+
+/**
+ * @swagger
+ * /api/messages/groups/{groupId}/members:
+ *   get:
+ *     tags: [Messages]
+ *     summary: Get group members list
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: groupId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Group members retrieved successfully
+ */
+router.get('/groups/:groupId/members', authenticateToken, getGroupMembers);
+
+/**
+ * @swagger
+ * /api/messages/groups/{groupId}/leave:
+ *   post:
+ *     tags: [Messages]
+ *     summary: Leave a group
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: groupId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Left group successfully
+ */
+router.post('/groups/:groupId/leave', authenticateToken, leaveGroup);
+
+/**
+ * @swagger
+ * /api/messages/groups/{groupId}:
+ *   delete:
+ *     tags: [Messages]
+ *     summary: Delete a group (creator or admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: groupId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Group deleted successfully
+ */
+router.delete('/groups/:groupId', authenticateToken, deleteGroup);
+
+/**
+ * @swagger
+ * /api/messages/groups/{groupId}/members/{memberId}:
+ *   delete:
+ *     tags: [Messages]
+ *     summary: Remove a member from group (creator or admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: groupId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: memberId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Member removed successfully
+ */
+router.delete('/groups/:groupId/members/:memberId', authenticateToken, removeGroupMember);
 
 export default router;

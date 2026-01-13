@@ -125,7 +125,7 @@ console.log('Serving static files from:', staticUploadsDir);
 // API Documentation - Always enabled
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Basic auth middleware for Swagger protection in production
+
 const swaggerAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (!isProduction || (!process.env.SWAGGER_USERNAME || !process.env.SWAGGER_PASSWORD)) {
     return next();

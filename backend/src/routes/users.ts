@@ -8,6 +8,7 @@ import {
   getUser,
   getUsers,
   getUserStats,
+  updateExperienceLevel,
   updateProfile,
   updateUserStatus,
   uploadAvatar
@@ -119,6 +120,36 @@ router.get('/stats', authenticateToken, requireAdmin, getUserStats);
  *         description: User status updated successfully
  */
 router.put('/:id/status', authenticateToken, requireMentee, updateUserStatus);
+
+/**
+ * @swagger
+ * /api/users/{id}/experience-level:
+ *   put:
+ *     tags: [Users]
+ *     summary: Update mentee experience level (Admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               experienceLevel:
+ *                 type: string
+ *                 enum: [BEGINNER, INTERMEDIATE, ADVANCED]
+ *     responses:
+ *       200:
+ *         description: Experience level updated successfully
+ */
+router.put('/:id/experience-level', authenticateToken, requireAdmin, updateExperienceLevel);
 
 /**
  * @swagger

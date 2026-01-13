@@ -25,6 +25,7 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     description: '',
     date: '',
     duration: 60,
+    meetingUrl: '',
     menteeIds: [] as string[]
   });
   const [mentees, setMentees] = useState<User[]>([]);
@@ -42,6 +43,7 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
         description: '',
         date: '',
         duration: 60,
+        meetingUrl: '',
         menteeIds: []
       });
       setError('');
@@ -102,7 +104,8 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       
       await axios.post('/sessions', {
         ...formData,
-        date: dateToSend
+        date: dateToSend,
+        meetingUrl: formData.meetingUrl || undefined
       });
       onSessionCreated();
       onClose();
@@ -111,6 +114,7 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
         description: '',
         date: '',
         duration: 60,
+        meetingUrl: '',
         menteeIds: []
       });
     } catch (error: any) {
@@ -263,6 +267,23 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
                     <option value={240}>4 hours</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label htmlFor="meetingUrl" className="block text-sm font-medium text-gray-700 mb-2">
+                  Meeting URL
+                </label>
+                <input
+                  type="url"
+                  id="meetingUrl"
+                  value={formData.meetingUrl}
+                  onChange={(e) => setFormData({ ...formData, meetingUrl: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="https://meet.google.com/xxx-xxxx-xxx or https://zoom.us/j/xxxxx"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Optional: Add a meeting link (Google Meet, Zoom, etc.) for this session
+                </p>
               </div>
             </div>
 

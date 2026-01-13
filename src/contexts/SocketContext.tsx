@@ -133,7 +133,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
       socketInstance.on('incoming_call', (data: { callerId: string; callerName: string; offer: RTCSessionDescriptionInit }) => {
         // Only show notification if not already on video call page
-        if (window.location.pathname !== '/video-call') {
+        if (window.location.pathname !== '/app/video-call') {
           setIncomingCall(data);
           // Play notification sound if possible
           try {

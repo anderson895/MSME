@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import prisma from '../config/database';
 import fs from 'fs';
 import path from 'path';
+import { getIO } from '../utils/socket';
 
 interface AuthRequest extends Request {
   user?: any;
@@ -51,6 +52,20 @@ export const createResource = async (req: AuthRequest, res: Response) => {
         }
       }
     });
+
+    // Emit socket event for resource upload to notify admins
+    const io = getIO();
+    if (io) {
+      try {
+        io.emit('resource_uploaded', {
+          resourceId: resource.id,
+          title: resource.title,
+          timestamp: new Date()
+        });
+      } catch (error) {
+        console.error('Error emitting resource_uploaded event:', error);
+      }
+    }
 
     res.status(201).json({
       success: true,

@@ -20,7 +20,7 @@ const CallNotification: React.FC = () => {
     }
     // Navigate to video call page with caller ID
     const callerId = incomingCall.callerId;
-    navigate(`/video-call?caller=${callerId}`);
+    navigate(`/app/video-call?caller=${callerId}`);
     clearIncomingCall();
   };
 

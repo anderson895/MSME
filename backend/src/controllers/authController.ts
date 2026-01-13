@@ -8,6 +8,8 @@ import prisma from '../config/database';
 import { sendVerificationEmail, sendWelcomeEmail, sendPasswordResetEmail } from '../config/email';
 import { LoginRequest, RegisterRequest, AuthTokens } from '../types';
 import { validatePassword } from '../utils/passwordValidation';
+import { createNotification } from './notificationController';
+import { getIO } from '../utils/socket';
 
 interface AuthRequest extends Request {
   user?: any;
@@ -40,6 +42,15 @@ const generateTokens = (userId: string): AuthTokens => {
 export const register = async (req: Request, res: Response) => {
   try {
     const { name, email, password, role = 'MENTEE' }: RegisterRequest = req.body;
+    
+    // Validate password requirements
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: passwordValidation.message || 'Password does not meet requirements'
+      });
+    }
     
     // Check if business permit is required for mentees
     if (role === 'MENTEE' && !req.file) {
@@ -136,24 +147,29 @@ export const register = async (req: Request, res: Response) => {
       data: userData
     });
 
-    // Send verification email for mentees
+    // Send verification email for mentees (non-blocking)
     if (role === 'MENTEE' && verificationToken) {
-      try {
-        await sendVerificationEmail(email, name, verificationToken);
-        console.log(`Verification email sent successfully to ${email}`);
-      } catch (emailError: any) {
-        console.error('Failed to send verification email:', emailError);
-        console.error('Email error details:', {
-          message: emailError.message,
-          code: emailError.code,
-          response: emailError.response
+      // Don't await - send email asynchronously to avoid blocking registration response
+      sendVerificationEmail(email, name, verificationToken)
+        .then(() => {
+          console.log(`Verification email sent successfully to ${email}`);
+        })
+        .catch((emailError: any) => {
+          console.error('Failed to send verification email:', emailError);
+          console.error('Email error details:', {
+            message: emailError.message,
+            code: emailError.code,
+            response: emailError.response
+          });
+          // Log email configuration status
+          if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+            console.error('EMAIL_USER or EMAIL_PASS environment variables are not set!');
+          }
+          // Log timeout errors specifically
+          if (emailError.message?.includes('timeout') || emailError.code === 'ETIMEDOUT') {
+            console.warn(`Email sending timed out for ${email}. User account created but verification email may not have been sent.`);
+          }
         });
-        // Log email configuration status
-        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-          console.error('EMAIL_USER or EMAIL_PASS environment variables are not set!');
-        }
-        // Continue with registration even if email fails
-      }
     }
 
     // Auto-join general group chat for mentees
@@ -184,6 +200,59 @@ export const register = async (req: Request, res: Response) => {
       } catch (error) {
         console.error('Failed to add mentee to general chat:', error);
         // Continue with registration even if chat group addition fails
+      }
+
+      // Notify all admins about new mentee registration
+      try {
+        // Find all active admins
+        const admins = await prisma.user.findMany({
+          where: {
+            role: 'ADMIN',
+            status: 'ACTIVE'
+          },
+          select: {
+            id: true,
+            name: true
+          }
+        });
+
+        // Create notification for each admin
+        for (const admin of admins) {
+          try {
+            await createNotification(
+              admin.id,
+              'New MSME Registration',
+              `A new mentee (MSME) has registered: ${user.name} (${user.email})`,
+              'info'
+            );
+
+            // Emit real-time notification via socket
+            const io = getIO();
+            if (io) {
+              io.to(`user_${admin.id}`).emit('new_notification', {
+                title: 'New MSME Registration',
+                message: `A new mentee (MSME) has registered: ${user.name} (${user.email})`,
+                type: 'info',
+                menteeId: user.id,
+                menteeName: user.name,
+                timestamp: new Date()
+              });
+              // Emit event to refresh recent activity
+              io.to(`user_${admin.id}`).emit('new_mentee_registration', {
+                menteeId: user.id,
+                menteeName: user.name,
+                timestamp: new Date()
+              });
+            }
+          } catch (error) {
+            console.error(`Error sending notification to admin ${admin.id}:`, error);
+          }
+        }
+
+        console.log(`Notifications sent to ${admins.length} admin(s) about new mentee registration: ${user.name}`);
+      } catch (error) {
+        console.error('Failed to send admin notifications for mentee registration:', error);
+        // Continue with registration even if notification fails
       }
     }
 
@@ -237,9 +306,27 @@ export const login = async (req: Request, res: Response) => {
   try {
     const { email, password }: LoginRequest = req.body;
 
-    // Find user
+    // Find user - explicitly select columns to avoid issues with missing columns
     const user = await prisma.user.findUnique({
-      where: { email }
+      where: { email },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        passwordHash: true,
+        avatar: true,
+        verified: true,
+        verificationToken: true,
+        verificationTokenExpires: true,
+        businessPermitUrl: true,
+        businessPermitFileName: true,
+        businessPermitFileSize: true,
+        createdAt: true,
+        updatedAt: true,
+        // resetToken and resetTokenExpires are optional - only include if they exist
+      }
     });
 
     console.log(user)

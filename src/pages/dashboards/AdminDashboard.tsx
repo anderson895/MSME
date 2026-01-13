@@ -1,7 +1,10 @@
 import axios from 'axios';
-import { BookOpen, Calendar, Users } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import { BookOpen, Calendar, Users, RefreshCw, UserCheck } from 'lucide-react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { useSocket } from '../../contexts/SocketContext';
+import { useAuth } from '../../hooks/useAuth';
 
 interface DashboardStats {
   totalUsers: number;
@@ -10,10 +13,16 @@ interface DashboardStats {
   totalSessions: number;
   completedSessions: number;
   totalResources: number;
+  pendingApprovals: number;
+}
+
+interface MSMECategoryData {
+  name: string;
+  value: number;
 }
 
 interface RecentActivity {
-  type: 'MENTOR_REGISTERED' | 'SESSION_COMPLETED' | 'RESOURCE_UPLOADED';
+  type: 'MENTOR_REGISTERED' | 'MENTEE_REGISTERED' | 'SESSION_COMPLETED' | 'RESOURCE_UPLOADED';
   title: string;
   description: string;
   timestamp: string;
@@ -54,16 +63,41 @@ const formatTimeAgo = (timestamp: string): string => {
 };
 
 const AdminDashboard: React.FC = () => {
+  const { socket } = useSocket();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [msmeCategoryData, setMsmeCategoryData] = useState<MSMECategoryData[]>([]);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [activityLoading, setActivityLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const fetchRecentActivity = useCallback(async (showLoading = false) => {
+    if (showLoading) {
+      setRefreshing(true);
+    }
+    try {
+      const response = await axios.get('/analytics/recent-activity');
+      setRecentActivity(response.data.data || []);
+    } catch (error) {
+      console.error('Error fetching recent activity:', error);
+      setRecentActivity([]);
+    } finally {
+      if (showLoading) {
+        setRefreshing(false);
+      }
+      setActivityLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
         const response = await axios.get('/analytics/dashboard');
         setStats(response.data.data.overview);
+        setMsmeCategoryData(response.data.data.msmeCategoryData || []);
       } catch (error) {
         console.error('Error fetching dashboard stats:', error);
       } finally {
@@ -71,21 +105,59 @@ const AdminDashboard: React.FC = () => {
       }
     };
 
-    const fetchRecentActivity = async () => {
-      try {
-        const response = await axios.get('/analytics/recent-activity');
-        setRecentActivity(response.data.data || []);
-      } catch (error) {
-        console.error('Error fetching recent activity:', error);
-        setRecentActivity([]);
-      } finally {
-        setActivityLoading(false);
-      }
-    };
-
+    // Initial fetch
     fetchStats();
     fetchRecentActivity();
-  }, []);
+
+    // Set up polling to refresh recent activity every 30 seconds
+    intervalRef.current = setInterval(() => {
+      fetchRecentActivity(false);
+    }, 30000); // 30 seconds
+
+    // Cleanup interval on unmount
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [fetchRecentActivity]);
+
+  // Listen for real-time events to refresh recent activity
+  useEffect(() => {
+    if (!socket || user?.role !== 'ADMIN') return;
+
+    const handleSessionCompleted = () => {
+      // Refresh recent activity when a session is completed
+      fetchRecentActivity(false);
+    };
+
+    const handleResourceUploaded = () => {
+      // Refresh recent activity when a resource is uploaded
+      fetchRecentActivity(false);
+    };
+
+    const handleMentorApproved = () => {
+      // Refresh recent activity when a mentor is approved
+      fetchRecentActivity(false);
+    };
+
+    const handleMenteeRegistered = () => {
+      // Refresh recent activity when a mentee registers
+      fetchRecentActivity(false);
+    };
+
+    socket.on('session_completed', handleSessionCompleted);
+    socket.on('resource_uploaded', handleResourceUploaded);
+    socket.on('mentor_approved', handleMentorApproved);
+    socket.on('new_mentee_registration', handleMenteeRegistered);
+
+    return () => {
+      socket.off('session_completed', handleSessionCompleted);
+      socket.off('resource_uploaded', handleResourceUploaded);
+      socket.off('mentor_approved', handleMentorApproved);
+      socket.off('new_mentee_registration', handleMenteeRegistered);
+    };
+  }, [socket, user?.role, fetchRecentActivity]);
 
   if (loading) {
     return (
@@ -107,25 +179,29 @@ const AdminDashboard: React.FC = () => {
       title: 'Total Users',
       value: stats?.totalUsers || 0,
       icon: Users,
-      color: 'bg-blue-500'
+      color: 'bg-blue-500',
+      onClick: () => navigate('/app/users')
     },
     {
       title: 'Active Mentors',
       value: stats?.totalMentors || 0,
       icon: Users,
-      color: 'bg-green-500'
+      color: 'bg-green-500',
+      onClick: () => navigate('/app/users')
     },
     {
       title: 'Total Mentees',
       value: stats?.totalMentees || 0,
       icon: Users,
-      color: 'bg-purple-500'
+      color: 'bg-purple-500',
+      onClick: () => navigate('/app/users')
     },
     {
       title: 'Training Sessions',
       value: stats?.totalSessions || 0,
       icon: Calendar,
-      color: 'bg-orange-500'
+      color: 'bg-orange-500',
+      onClick: () => navigate('/app/sessions')
     }
   ];
 
@@ -135,6 +211,14 @@ const AdminDashboard: React.FC = () => {
   ];
 
   const COLORS = ['#10B981', '#F59E0B'];
+  const MSME_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#6366F1'];
+
+  // Format MSME category data with colors
+  const formattedMsmeCategoryData = msmeCategoryData.map((item, index) => ({
+    name: item.name,
+    value: item.value,
+    color: MSME_COLORS[index % MSME_COLORS.length]
+  }));
 
   return (
     <div className="space-y-8">
@@ -143,10 +227,38 @@ const AdminDashboard: React.FC = () => {
         <p className="text-gray-600 mt-2">Overview of your mentorship platform</p>
       </div>
 
+      {/* Pending Approval Card - Prominent */}
+      {stats && stats.pendingApprovals > 0 && (
+        <div 
+          onClick={() => navigate('/app/users?status=PENDING_APPROVAL')}
+          className="bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-400 rounded-lg p-6 shadow-md hover:shadow-lg transition-all cursor-pointer"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="bg-yellow-500 p-4 rounded-lg">
+                <UserCheck className="h-8 w-8 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-yellow-800">Pending Approvals</p>
+                <p className="text-3xl font-bold text-yellow-900">{stats.pendingApprovals}</p>
+                <p className="text-xs text-yellow-700 mt-1">Click to review and approve users</p>
+              </div>
+            </div>
+            <div className="text-yellow-600">
+              <Users className="h-6 w-6" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((card, index) => (
-          <div key={index} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+          <div 
+            key={index} 
+            onClick={card.onClick}
+            className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-all cursor-pointer"
+          >
             <div className="flex items-center">
               <div className={`${card.color} p-3 rounded-lg`}>
                 <card.icon className="h-6 w-6 text-white" />
@@ -204,10 +316,48 @@ const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* MSME Sales Category Chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">MSME Sales Category</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                data={formattedMsmeCategoryData}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={({ name, percent }) => {
+                  const percentage = ((percent ?? 0) * 100).toFixed(0);
+                  return percentage === '0' ? '' : `${name} ${percentage}%`;
+                }}
+                outerRadius={80}
+                fill="#8884d8"
+                dataKey="value"
+              >
+                {formattedMsmeCategoryData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip formatter={(value: number) => [`₱${value.toLocaleString()}`, 'Revenue']} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
       {/* Recent Activity */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Recent Activity</h3>
+          <button
+            onClick={() => fetchRecentActivity(true)}
+            disabled={refreshing}
+            className="flex items-center space-x-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Refresh activity"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+          </button>
         </div>
         <div className="p-6">
           {activityLoading ? (

@@ -138,9 +138,9 @@ const EditSessionModal: React.FC<EditSessionModalProps> = ({
         status: formData.status
       };
 
-      // Include meetingUrl if provided (for group sessions with external links like Google Meet)
-      if (formData.meetingUrl.trim()) {
-        updateData.meetingUrl = formData.meetingUrl.trim();
+      // Include meetingUrl if provided (allow empty string to clear it)
+      if (formData.meetingUrl !== undefined) {
+        updateData.meetingUrl = formData.meetingUrl.trim() || null;
       }
 
       // Include menteeIds if mentee selection was modified
@@ -336,27 +336,23 @@ const EditSessionModal: React.FC<EditSessionModalProps> = ({
                 </div>
               </div>
 
-              {/* Meeting URL - Show for group sessions or when status is IN_PROGRESS */}
-              {(session.mentees.length > 1 || formData.status === 'IN_PROGRESS') && (
-                <div>
-                  <label htmlFor="meetingUrl" className="block text-sm font-medium text-gray-700 mb-2">
-                    Meeting URL
-                  </label>
-                  <input
-                    type="url"
-                    id="meetingUrl"
-                    value={formData.meetingUrl}
-                    onChange={(e) => setFormData({ ...formData, meetingUrl: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="https://meet.google.com/xxx-xxxx-xxx or other meeting link"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    {session.mentees.length > 1 
-                      ? 'For group sessions, provide an external meeting URL (e.g., Google Meet, Zoom)'
-                      : 'Provide an external meeting URL for the session'}
-                  </p>
-                </div>
-              )}
+              {/* Meeting URL - Always editable */}
+              <div>
+                <label htmlFor="meetingUrl" className="block text-sm font-medium text-gray-700 mb-2">
+                  Meeting URL
+                </label>
+                <input
+                  type="url"
+                  id="meetingUrl"
+                  value={formData.meetingUrl}
+                  onChange={(e) => setFormData({ ...formData, meetingUrl: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="https://meet.google.com/xxx-xxxx-xxx or https://zoom.us/j/xxxxx"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Optional: Add a meeting link (Google Meet, Zoom, etc.) for this session
+                </p>
+              </div>
             </div>
 
             {/* Right Column - Current Mentees */}

@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE `users` ADD COLUMN `experienceLevel` ENUM('BEGINNER', 'INTERMEDIATE', 'ADVANCED') NULL;
+

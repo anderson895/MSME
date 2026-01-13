@@ -4,6 +4,7 @@ import {
   deleteSession,
   getSessions,
   getSessionById,
+  markAttendance,
   updateSession
 } from '../controllers/sessionController';
 import { authenticateToken, requireMentor } from '../middleware/auth';
@@ -101,6 +102,40 @@ router.get('/:id', authenticateToken, getSessionById);
  *         description: Session updated successfully
  */
 router.put('/:id', authenticateToken, requireMentor, updateSession);
+
+/**
+ * @swagger
+ * /api/sessions/{sessionId}/attendance:
+ *   post:
+ *     tags: [Sessions]
+ *     summary: Mark mentee attendance for a session
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               menteeId:
+ *                 type: string
+ *                 description: Required for mentor/admin, optional for mentee (uses own ID)
+ *     responses:
+ *       200:
+ *         description: Attendance marked successfully
+ *       404:
+ *         description: Session or mentee assignment not found
+ *       403:
+ *         description: Access denied
+ */
+router.post('/:sessionId/attendance', authenticateToken, markAttendance);
 
 /**
  * @swagger

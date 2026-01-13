@@ -40,49 +40,49 @@ const Sidebar: React.FC = () => {
         return [
           {
             name: 'Dashboard',
-            href: '/admin',
+            href: '/app/admin',
             icon: LayoutDashboard,
             roles: ['ADMIN']
           },
           {
             name: 'Users',
-            href: '/users',
+            href: '/app/users',
             icon: Users,
             roles: ['ADMIN']
           },
           {
             name: 'Sessions',
-            href: '/sessions',
+            href: '/app/sessions',
             icon: Calendar,
             roles: ['ADMIN']
           },
           {
             name: 'Announcements',
-            href: '/announcements',
+            href: '/app/announcements',
             icon: Megaphone,
             roles: ['ADMIN']
           },
           {
             name: 'Calendar',
-            href: '/calendar',
+            href: '/app/calendar',
             icon: Calendar,
             roles: ['ADMIN']
           },
           {
             name: 'Resources',
-            href: '/resources',
+            href: '/app/resources',
             icon: BookOpen,
             roles: ['ADMIN']
           },
           {
             name: 'Chat',
-            href: '/chat',
+            href: '/app/chat',
             icon: MessageSquare,
             roles: ['ADMIN']
           },
           {
             name: 'Profile',
-            href: '/profile',
+            href: '/app/profile',
             icon: User,
             roles: ['ADMIN']
           }
@@ -92,49 +92,49 @@ const Sidebar: React.FC = () => {
         return [
           {
             name: 'Dashboard',
-            href: '/mentor',
+            href: '/app/mentor',
             icon: LayoutDashboard,
             roles: ['MENTOR']
           },
           {
             name: 'List of Mentees',
-            href: '/mentor/mentees',
+            href: '/app/mentor/mentees',
             icon: Users,
             roles: ['MENTOR']
           },
           {
             name: 'Sessions',
-            href: '/sessions',
+            href: '/app/sessions',
             icon: Calendar,
             roles: ['MENTOR']
           },
           {
             name: 'Announcements',
-            href: '/announcements',
+            href: '/app/announcements',
             icon: Megaphone,
             roles: ['MENTOR']
           },
           {
             name: 'Calendar',
-            href: '/calendar',
+            href: '/app/calendar',
             icon: Calendar,
             roles: ['MENTOR']
           },
           {
             name: 'Resources',
-            href: '/resources',
+            href: '/app/resources',
             icon: BookOpen,
             roles: ['MENTOR']
           },
           {
             name: 'Chat',
-            href: '/chat',
+            href: '/app/chat',
             icon: MessageSquare,
             roles: ['MENTOR']
           },
           {
             name: 'Profile',
-            href: '/profile',
+            href: '/app/profile',
             icon: User,
             roles: ['MENTOR']
           }
@@ -144,37 +144,37 @@ const Sidebar: React.FC = () => {
         return [
           {
             name: 'Dashboard',
-            href: '/mentee',
+            href: '/app/mentee',
             icon: LayoutDashboard,
             roles: ['MENTEE']
           },
           {
             name: 'My Mentors',
-            href: '/mentee/mentors',
+            href: '/app/mentee/mentors',
             icon: Users,
             roles: ['MENTEE']
           },
           {
             name: 'Calendar',
-            href: '/calendar',
+            href: '/app/calendar',
             icon: Calendar,
             roles: ['MENTEE']
           },
           {
             name: 'Resources',
-            href: '/resources',
+            href: '/app/resources',
             icon: BookOpen,
             roles: ['MENTEE']
           },
           {
             name: 'Chat',
-            href: '/chat',
+            href: '/app/chat',
             icon: MessageSquare,
             roles: ['MENTEE']
           },
           {
             name: 'Profile',
-            href: '/profile',
+            href: '/app/profile',
             icon: User,
             roles: ['MENTEE']
           }
@@ -228,7 +228,7 @@ const Sidebar: React.FC = () => {
             
             const handleNavigation = (e: React.MouseEvent<HTMLAnchorElement>) => {
               // If call is active and not already on video-call page, prevent navigation
-              if (isCallActive && location.pathname === '/video-call' && item.href !== '/video-call') {
+              if (isCallActive && location.pathname === '/app/video-call' && item.href !== '/app/video-call') {
                 e.preventDefault();
                 const confirmed = window.confirm('You have an active call. Ending the call will disconnect you. Do you want to end the call and navigate?');
                 if (confirmed) {
@@ -251,7 +251,7 @@ const Sidebar: React.FC = () => {
                     ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700'
                     : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
                   }
-                  ${isCallActive && location.pathname === '/video-call' && item.href !== '/video-call' 
+                  ${isCallActive && location.pathname === '/app/video-call' && item.href !== '/app/video-call' 
                     ? 'opacity-50 cursor-not-allowed' 
                     : ''
                   }

@@ -11,7 +11,7 @@ interface AuthRequest extends Request {
 
 export const createSession = async (req: AuthRequest, res: Response) => {
   try {
-    const { title, description, date, duration, menteeIds }: CreateSessionRequest = req.body;
+    const { title, description, date, duration, meetingUrl, menteeIds }: CreateSessionRequest = req.body;
     const mentorId = req.user.id;
 
     const session = await prisma.session.create({
@@ -20,6 +20,7 @@ export const createSession = async (req: AuthRequest, res: Response) => {
         description,
         date: new Date(date),
         duration,
+        meetingUrl: meetingUrl || null,
         mentorId,
         mentees: {
           create: menteeIds.map(menteeId => ({ menteeId }))
@@ -274,9 +275,9 @@ export const updateSession = async (req: AuthRequest, res: Response) => {
     // Handle meetingUrl: For group sessions, use provided URL or keep existing
     // For one-on-one sessions, auto-generate simple-peer URL if not provided
     if (status === 'IN_PROGRESS' && existingSession.status !== 'IN_PROGRESS') {
-      if (meetingUrl) {
+      if (meetingUrl && meetingUrl.trim()) {
         // Use provided meeting URL (for group sessions with external links like Google Meet)
-        updateData.meetingUrl = meetingUrl;
+        updateData.meetingUrl = meetingUrl.trim();
       } else if (!isGroupSession && !existingSession.meetingUrl) {
         // Only auto-generate for one-on-one sessions if no URL provided
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -284,8 +285,8 @@ export const updateSession = async (req: AuthRequest, res: Response) => {
       }
       // For group sessions without provided URL, keep existing or leave empty (mentor must provide)
     } else if (meetingUrl !== undefined) {
-      // Allow updating meetingUrl at any time
-      updateData.meetingUrl = meetingUrl;
+      // Allow updating meetingUrl at any time (convert empty strings to null)
+      updateData.meetingUrl = meetingUrl && meetingUrl.trim() ? meetingUrl.trim() : null;
     }
 
     // Update mentees if menteeIds are provided
@@ -319,12 +320,13 @@ export const updateSession = async (req: AuthRequest, res: Response) => {
       }
     });
 
+    const io = getIO();
+    
     // If status changed to IN_PROGRESS, send notifications to all mentees
     if (status === 'IN_PROGRESS' && existingSession.status !== 'IN_PROGRESS') {
       const mentees = session.mentees.map(sm => sm.mentee);
       
       // Send notifications to all mentees (only socket notification to avoid duplicates)
-      const io = getIO();
       for (const mentee of mentees) {
         try {
           // Only emit real-time notification via socket (database notification will be created by socket handler if needed)
@@ -344,6 +346,20 @@ export const updateSession = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    // If status changed to COMPLETED, notify admins for recent activity update
+    if (status === 'COMPLETED' && existingSession.status !== 'COMPLETED' && io) {
+      try {
+        // Emit event to all admin users to refresh recent activity
+        io.emit('session_completed', {
+          sessionId: session.id,
+          title: session.title,
+          timestamp: new Date()
+        });
+      } catch (error) {
+        console.error('Error emitting session_completed event:', error);
+      }
+    }
+
     res.json({
       success: true,
       data: session,
@@ -354,6 +370,105 @@ export const updateSession = async (req: AuthRequest, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to update session'
+    });
+  }
+};
+
+export const markAttendance = async (req: AuthRequest, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const { menteeId } = req.body;
+    const userId = req.user.id;
+
+    // Check if session exists
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      include: {
+        mentees: true
+      }
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found'
+      });
+    }
+
+    // Determine which mentee to mark attendance for
+    let targetMenteeId = menteeId;
+    
+    // If user is a mentee, they can mark their own attendance
+    if (req.user.role === 'MENTEE') {
+      targetMenteeId = userId;
+    } 
+    // If user is mentor, they can mark attendance for mentees in their sessions
+    else if (req.user.role === 'MENTOR') {
+      if (session.mentorId !== userId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Unauthorized. You can only mark attendance for sessions you created.'
+        });
+      }
+      // If menteeId not provided and user is mentor, return error
+      if (!menteeId) {
+        return res.status(400).json({
+          success: false,
+          message: 'menteeId is required when marking attendance as mentor'
+        });
+      }
+      targetMenteeId = menteeId;
+    }
+    // Admin can mark attendance for any mentee
+    else if (req.user.role === 'ADMIN') {
+      if (!menteeId) {
+        return res.status(400).json({
+          success: false,
+          message: 'menteeId is required when marking attendance as admin'
+        });
+      }
+      targetMenteeId = menteeId;
+    }
+
+    // Check if mentee is assigned to this session
+    const sessionMentee = await prisma.sessionMentee.findUnique({
+      where: {
+        sessionId_menteeId: {
+          sessionId,
+          menteeId: targetMenteeId
+        }
+      }
+    });
+
+    if (!sessionMentee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Mentee is not assigned to this session'
+      });
+    }
+
+    // Mark attendance
+    await prisma.sessionMentee.update({
+      where: {
+        sessionId_menteeId: {
+          sessionId,
+          menteeId: targetMenteeId
+        }
+      },
+      data: {
+        attended: true
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Attendance marked successfully'
+    });
+  } catch (error) {
+    console.error('Mark attendance error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to mark attendance'
     });
   }
 };

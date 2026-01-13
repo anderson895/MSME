@@ -1,30 +1,62 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { GraduationCap, Eye, EyeOff, Upload, FileText, X } from 'lucide-react';
 
 const RegisterPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const roleFromUrl = searchParams.get('role')?.toUpperCase();
+  
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'MENTEE'
+    role: (roleFromUrl === 'MENTOR' || roleFromUrl === 'MENTEE') ? roleFromUrl : 'MENTEE'
   });
+  
+  useEffect(() => {
+    // Update role if URL param changes
+    if (roleFromUrl === 'MENTOR' || roleFromUrl === 'MENTEE') {
+      setFormData(prev => ({ ...prev, role: roleFromUrl }));
+    }
+  }, [roleFromUrl]);
   const [businessPermit, setBusinessPermit] = useState<File | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showMentorSuccess, setShowMentorSuccess] = useState(false);
+  const [passwordErrors, setPasswordErrors] = useState({
+    length: false,
+    uppercase: false,
+    lowercase: false,
+    number: false
+  });
 
   const { register } = useAuth();
 
+  const validatePasswordCriteria = (password: string) => {
+    setPasswordErrors({
+      length: password.length >= 8,
+      uppercase: /[A-Z]/.test(password),
+      lowercase: /[a-z]/.test(password),
+      number: /[0-9]/.test(password)
+    });
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const value = e.target.value;
     setFormData({
       ...formData,
-      [e.target.name]: e.target.value
+      [e.target.name]: value
     });
+
+    // Validate password criteria in real-time
+    if (e.target.name === 'password') {
+      validatePasswordCriteria(value);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -98,10 +130,42 @@ const RegisterPage: React.FC = () => {
     }
   };
 
+  const validatePassword = (password: string): string | null => {
+    if (!password) {
+      return 'Password is required';
+    }
+
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters long';
+    }
+
+    if (!/[A-Z]/.test(password)) {
+      return 'Password must contain at least one uppercase letter';
+    }
+
+    if (!/[a-z]/.test(password)) {
+      return 'Password must contain at least one lowercase letter';
+    }
+
+    if (!/[0-9]/.test(password)) {
+      return 'Password must contain at least one number';
+    }
+
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+
+    // Validate password requirements
+    const passwordError = validatePassword(formData.password);
+    if (passwordError) {
+      setError(passwordError);
+      setLoading(false);
+      return;
+    }
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
@@ -401,22 +465,73 @@ const RegisterPage: React.FC = () => {
                   )}
                 </button>
               </div>
+              {/* Password Requirements */}
+              {formData.password && (
+                <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                  <p className="text-xs font-medium text-gray-700 mb-2">Password must contain:</p>
+                  <ul className="space-y-1">
+                    <li className={`text-xs flex items-center ${passwordErrors.length ? 'text-green-600' : 'text-gray-500'}`}>
+                      <span className={`mr-2 ${passwordErrors.length ? 'text-green-500' : 'text-gray-400'}`}>
+                        {passwordErrors.length ? '✓' : '○'}
+                      </span>
+                      At least 8 characters
+                    </li>
+                    <li className={`text-xs flex items-center ${passwordErrors.uppercase ? 'text-green-600' : 'text-gray-500'}`}>
+                      <span className={`mr-2 ${passwordErrors.uppercase ? 'text-green-500' : 'text-gray-400'}`}>
+                        {passwordErrors.uppercase ? '✓' : '○'}
+                      </span>
+                      One uppercase letter (A-Z)
+                    </li>
+                    <li className={`text-xs flex items-center ${passwordErrors.lowercase ? 'text-green-600' : 'text-gray-500'}`}>
+                      <span className={`mr-2 ${passwordErrors.lowercase ? 'text-green-500' : 'text-gray-400'}`}>
+                        {passwordErrors.lowercase ? '✓' : '○'}
+                      </span>
+                      One lowercase letter (a-z)
+                    </li>
+                    <li className={`text-xs flex items-center ${passwordErrors.number ? 'text-green-600' : 'text-gray-500'}`}>
+                      <span className={`mr-2 ${passwordErrors.number ? 'text-green-500' : 'text-gray-400'}`}>
+                        {passwordErrors.number ? '✓' : '○'}
+                      </span>
+                      One number (0-9)
+                    </li>
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div>
               <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
                 Confirm Password
               </label>
-              <input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                required
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                className="mt-1 appearance-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Confirm your password"
-              />
+              <div className="mt-1 relative">
+                <input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  required
+                  value={formData.confirmPassword}
+                  onChange={handleChange}
+                  className="appearance-none relative block w-full px-3 py-3 pr-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                  placeholder="Confirm your password"
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4 text-gray-400" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-gray-400" />
+                  )}
+                </button>
+              </div>
+              {formData.confirmPassword && formData.password !== formData.confirmPassword && (
+                <p className="mt-1 text-xs text-red-600">Passwords do not match</p>
+              )}
+              {formData.confirmPassword && formData.password === formData.confirmPassword && formData.password && (
+                <p className="mt-1 text-xs text-green-600">✓ Passwords match</p>
+              )}
             </div>
           </div>
 

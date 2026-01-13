@@ -5,6 +5,8 @@ import path from 'path';
 import fs from 'fs';
 import prisma from '../config/database';
 import { validatePassword } from '../utils/passwordValidation';
+import { getIO } from '../utils/socket';
+import { sendApprovalEmail } from '../config/email';
 
 interface AuthRequest extends Request {
   user?: any;
@@ -44,18 +46,43 @@ export const getUsers = async (req: AuthRequest, res: Response) => {
         businessPermitUrl: true,
         businessPermitFileName: true,
         businessPermitFileSize: true,
+        experienceLevel: true,
         createdAt: true,
         updatedAt: true
       },
       orderBy: { createdAt: 'desc' }
     });
 
+    // For admin users, include attended sessions count for mentees
+    let usersWithStats: any[] = users;
+    if (user.role === 'ADMIN') {
+      usersWithStats = await Promise.all(
+        users.map(async (u) => {
+          if (u.role === 'MENTEE') {
+            // Count all sessions where mentee attended, regardless of session status
+            // This includes IN_PROGRESS and COMPLETED sessions
+            const attendedSessionsCount = await prisma.sessionMentee.count({
+              where: {
+                menteeId: u.id,
+                attended: true
+              }
+            });
+            return {
+              ...u,
+              attendedSessions: Number(attendedSessionsCount)
+            };
+          }
+          return u;
+        })
+      );
+    }
+
     // Only include business permit info for admins
     const usersData = user.role === 'ADMIN' 
-      ? users 
-      : users.map((user) => {
+      ? usersWithStats 
+      : usersWithStats.map((user) => {
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { businessPermitUrl, businessPermitFileName, businessPermitFileSize, ...rest } = user;
+          const { businessPermitUrl, businessPermitFileName, businessPermitFileSize, attendedSessions, ...rest } = user;
           return rest;
         });
 
@@ -148,6 +175,15 @@ export const updateUserStatus = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const { status } = req.body;
 
+    // Get existing user to check previous status and role
+    const existingUser = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        role: true
+      }
+    });
+
     const user = await prisma.user.update({
       where: { id },
       data: { status },
@@ -163,6 +199,40 @@ export const updateUserStatus = async (req: AuthRequest, res: Response) => {
         updatedAt: true
       }
     });
+
+    // If user was approved (status changed from PENDING_APPROVAL to ACTIVE), send notifications
+    if (
+      existingUser &&
+      existingUser.status === 'PENDING_APPROVAL' &&
+      status === 'ACTIVE' &&
+      (user.role === 'MENTOR' || user.role === 'MENTEE')
+    ) {
+      // Send email notification to the approved user (non-blocking)
+      sendApprovalEmail(user.email, user.name, user.role)
+        .then(() => {
+          console.log(`Approval email sent successfully to ${user.email} (${user.role})`);
+        })
+        .catch((emailError) => {
+          console.error('Failed to send approval email:', emailError);
+          // Don't fail the approval if email fails
+        });
+
+      // Emit socket event for mentor approvals (for admin dashboard)
+      if (user.role === 'MENTOR') {
+        const io = getIO();
+        if (io) {
+          try {
+            io.emit('mentor_approved', {
+              mentorId: user.id,
+              name: user.name,
+              timestamp: new Date()
+            });
+          } catch (error) {
+            console.error('Error emitting mentor_approved event:', error);
+          }
+        }
+      }
+    }
 
     res.json({
       success: true,
@@ -373,6 +443,78 @@ export const uploadAvatar = async (req: AuthRequest, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to upload avatar'
+    });
+  }
+};
+
+export const updateExperienceLevel = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { experienceLevel } = req.body;
+
+    // Only admins can update experience level
+    if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized. Only admins can update experience level.'
+      });
+    }
+
+    // Validate experience level
+    const validLevels = ['BEGINNER', 'INTERMEDIATE', 'ADVANCED'];
+    if (!validLevels.includes(experienceLevel)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid experience level. Must be BEGINNER, INTERMEDIATE, or ADVANCED.'
+      });
+    }
+
+    // Get user to check if they are a mentee
+    const targetUser = await prisma.user.findUnique({
+      where: { id },
+      select: { role: true }
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (targetUser.role !== 'MENTEE') {
+      return res.status(400).json({
+        success: false,
+        message: 'Experience level can only be set for mentees (MSMEs).'
+      });
+    }
+
+    // Update experience level
+    const user = await prisma.user.update({
+      where: { id },
+      data: { experienceLevel },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        experienceLevel: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    res.json({
+      success: true,
+      data: user,
+      message: `Experience level updated to ${experienceLevel} successfully`
+    });
+  } catch (error) {
+    console.error('Update experience level error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update experience level'
     });
   }
 };
